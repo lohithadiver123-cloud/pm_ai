@@ -1,4 +1,4 @@
-# AI-Driven Product Assistant (Milestone 1)
+# AI-Driven Product Assistant 
 
 ## Project title
 AI-Driven Product Assistant based on Customer feedback with Planning & Requirements Generation Workspace.
