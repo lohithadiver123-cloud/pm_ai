@@ -161,9 +161,8 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - [x] Text cleaning is implemented
 - [x] Duplicate handling exists
 - [x] Rule-based categorization is implemented
-- [x] Sentiment detection is implemented
-- [x] Dashboard summary stats are available
--
+
+
 
 
 
