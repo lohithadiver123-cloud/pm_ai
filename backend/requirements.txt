@@ -1,0 +1,27 @@
+# PM Copilot - Backend Dependencies
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Async MongoDB driver
+motor==3.7.0
+
+# Data validation
+pydantic==2.10.4
+pydantic-core==2.27.2
+email-validator==2.2.0
+
+# Authentication
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# File upload & data processing
+python-multipart==0.0.20
+pandas==2.2.3
+
+# NLP basics (Milestone 1)
+nltk==3.9.1
+
+# CORS support
+python-dotenv==1.0.1
