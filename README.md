@@ -4,7 +4,7 @@
 AI-Driven Product Assistant based on Customer feedback with Planning & Requirements Generation Workspace.
 
 ## Clean project structure
-The codebase follows a simple backend/frontend split and keeps concerns separated for a more professional layout:
+
 
 ```text
 project2/
