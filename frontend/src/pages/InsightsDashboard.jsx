@@ -231,7 +231,7 @@ function InsightsDashboard() {
                     </h3>
                   </div>
                   <span style={{ fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '12px', backgroundColor: 'var(--primary-light)', color: 'var(--primary)' }}>
-                    Powered by Groq ({insights.ai_model || 'Qwen 3.8 27B'})
+                    AI-Powered Analysis
                   </span>
                 </div>
                 <p style={{ fontSize: '14px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '14px' }}>
@@ -669,9 +669,9 @@ function InsightsDashboard() {
           padding: '20px'
         }}>
           <div className="card" style={{ maxWidth: '480px', width: '100%', padding: '24px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>Groq AI Engine Settings</h2>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>AI Engine Settings</h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-              Groq provides high-speed LLaMA/Qwen model inference to analyze customer pain points, extract themes, and cluster product feature requests.
+              AI-powered intelligence engine to analyze customer pain points, extract themes, and cluster product feature requests.
             </p>
 
             <div style={{
@@ -683,7 +683,7 @@ function InsightsDashboard() {
               fontSize: '12.5px'
             }}>
               <div><strong>Status:</strong> {aiStatus?.status || 'Checking...'}</div>
-              {aiStatus?.model && <div><strong>Active Model:</strong> {aiStatus.model}</div>}
+
               {aiStatus?.message && <div style={{ color: 'var(--text-muted)', marginTop: '4px' }}>{aiStatus.message}</div>}
             </div>
 
