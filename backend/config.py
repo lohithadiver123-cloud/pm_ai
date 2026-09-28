@@ -14,13 +14,21 @@ class Settings:
     """Application settings loaded from environment variables with sensible defaults."""
 
     # MongoDB configuration
-    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb+srv://ibhumika611_db_user:Xo9NgvXUXVOmbKGG@productassistant.eu2jcjc.mongodb.net/?appName=ProductAssistant")
+    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
     DB_NAME: str = os.getenv("DB_NAME", "pm_copilot")
 
     # JWT configuration
     SECRET_KEY: str = os.getenv("SECRET_KEY", "pm-copilot-secret-key-change-in-production")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+
+    # AI / Gemini configuration (Milestone 2 & 3 Pure AI)
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
+    # AI / Groq configuration (Milestone 2)
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "allam-2-7b")
 
     # CORS configuration - allow all origins for development
     CORS_ORIGINS: list = ["*"]

@@ -10,9 +10,9 @@ from services.preprocessing import normalize
 
 class Milestone1Validation(unittest.TestCase):
     def test_normalize_removes_noise(self):
-        text = "!!! The app is super slow and crashes often!!!"
+        text = "!!! The server is super slow and crashes often!!!"
         result = normalize(text)
-        self.assertIn("app", result)
+        self.assertIn("server", result)
         self.assertIn("slow", result)
         self.assertIn("crashes", result)
         self.assertNotIn("!!!", " ".join(result))

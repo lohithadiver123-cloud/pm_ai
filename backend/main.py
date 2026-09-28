@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import connect_to_mongo, close_mongo_connection
-from routers import auth, workspace, feedback
+from routers import auth, workspace, feedback, insights, prd, user_stories, prioritization, copilot
 from config import settings
 
 
@@ -30,8 +30,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="PM Copilot API",
-    description="AI Product Manager Copilot  Feedback Management & Analysis",
-    version="0.1.0",
+    description="AI Product Manager Copilot — Feedback Management, Prioritization & Requirements Workspace",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -44,10 +44,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
+# Register routers (Milestones 1, 2, and 3)
 app.include_router(auth.router)
 app.include_router(workspace.router)
 app.include_router(feedback.router)
+app.include_router(insights.router)
+app.include_router(prd.router)
+app.include_router(user_stories.router)
+app.include_router(prioritization.router)
+app.include_router(copilot.router)
 
 
 @app.get("/api/health")

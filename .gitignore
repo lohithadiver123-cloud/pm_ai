@@ -29,6 +29,7 @@ dist/
 # IDE / OS
 .vscode/
 .idea/
+.freebuff/
 *.DS_Store
 Thumbs.db
 

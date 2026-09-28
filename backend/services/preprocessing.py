@@ -7,15 +7,24 @@ Uses NLTK for basic text processing (Milestone 1 — no ML/AI).
 import re
 from typing import List
 
+EXTRA_STOPWORDS = {
+    "app", "application", "please", "turn", "bring", "getting", "waste", "also", "even",
+    "using", "used", "make", "giving", "give", "much", "many", "good", "bad", "like",
+    "need", "want", "would", "could", "should", "thing", "things", "instagram", "facebook",
+    "whatsapp", "meta", "really", "always", "every", "cant", "cannot", "dont", "doesnt",
+    "wont", "didnt", "got", "get", "still", "back", "time", "one", "two", "see", "seen",
+    "features", "feature", "enhancement", "option", "options"
+}
+
 # Import NLTK resources — these will be downloaded on first use
 try:
     from nltk.corpus import stopwords
     from nltk.tokenize import word_tokenize
-    STOPWORDS_SET = set(stopwords.words('english'))
+    STOPWORDS_SET = set(stopwords.words('english')).union(EXTRA_STOPWORDS)
     NLTK_AVAILABLE = True
 except LookupError:
     # NLTK data not downloaded yet — will download on first call
-    STOPWORDS_SET = set()
+    STOPWORDS_SET = set(EXTRA_STOPWORDS)
     NLTK_AVAILABLE = False
 
 
@@ -32,8 +41,9 @@ def _ensure_nltk_downloaded() -> None:
         nltk.download('punkt_tab', quiet=True)
         from nltk.corpus import stopwords
         from nltk.tokenize import word_tokenize
-        STOPWORDS_SET = set(stopwords.words('english'))
+        STOPWORDS_SET = set(stopwords.words('english')).union(EXTRA_STOPWORDS)
         NLTK_AVAILABLE = True
+
 
 
 def tokenize(text: str) -> List[str]:

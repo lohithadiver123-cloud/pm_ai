@@ -15,10 +15,11 @@
 - [Data Models](#data-models)
 - [Milestone 1 — Feedback Pipeline (Completed)](#milestone-1--feedback-pipeline-completed)
 - [Milestone 2 — AI-Powered Insights (Completed)](#milestone-2--ai-powered-insights-completed)
+- [Milestone 3 — Planning & Requirements Generation Workspace (Completed)](#milestone-3--planning--requirements-generation-workspace-completed)
 - [Setup & Installation](#setup--installation)
 - [Environment Variables](#environment-variables)
 - [Running Tests](#running-tests)
-- [Future Roadmap](#future-roadmap)
+- [Future Roadmap (Milestone 4)](#future-roadmap-milestone-4)
 
 ---
 
@@ -61,13 +62,18 @@
 │                                                                     │
 │   ┌──────────┐ ┌──────────┐ ┌───────────┐ ┌──────────────────────┐ │
 │   │  Login   │ │ Register │ │ Dashboard │ │ Insights Dashboard   │ │
-│   └──────────┘ └──────────┘ └───────────┘ │  • Themes & Charts   │ │
-│   ┌──────────────┐ ┌───────────────┐      │  • Pain Points       │ │
-│   │ Import Data  │ │ Feedback List │      │  • Feature Clusters  │ │
-│   └──────────────┘ └───────────────┘      │  • Trend Analysis    │ │
-│                                            │  • AI Summary Panel  │ │
-│                                            └──────────────────────┘ │
-│   Components: Navbar, Charts (Recharts-style SVG visualizations)    │
+│   └──────────┘ └──────────┘ └───────────┘ └──────────────────────┘ │
+│   ┌────────────────────┐ ┌────────────────────┐ ┌────────────────┐ │
+│   │  PRD Studio (M3)   │ │ User Stories (M3)  │ │ Prioritize(M3) │ │
+│   │  • AI Doc View     │ │ • Kanban Board     │ │ • RICE Scoring │ │
+│   │  • Markdown Export │ │ • Gherkin Criteria │ │ • 2x2 Matrix   │ │
+│   └────────────────────┘ └────────────────────┘ └────────────────┘ │
+│   ┌────────────────────────────────┐ ┌───────────────┐ ┌─────────┐ │
+│   │  Conversational Copilot (M3)   │ │ Feedback List │ │ Import  │ │
+│   │  • Grounded Chat & Citations   │ └───────────────┘ └─────────┘ │
+│   └────────────────────────────────┘                               │
+│                                                                     │
+│   Components: Navbar, Charts, FloatingCopilot Widget                │
 │   Services:   api.js (Axios HTTP client with JWT interceptor)       │
 └────────────────────────────┬────────────────────────────────────────┘
                              │ HTTP (REST API)
@@ -78,23 +84,28 @@
 │                                                                     │
 │   ┌─────────────────────── API ROUTERS ──────────────────────────┐  │
 │   │                                                               │  │
-│   │  /api/auth      → Register, Login, JWT token generation       │  │
-│   │  /api/workspaces → Create, list, manage workspaces            │  │
-│   │  /api/feedback   → Import CSV/JSON, list, clean, categorize   │  │
-│   │  /api/insights   → Analyze, themes, pain points, clusters     │  │
-│   │  /api/health     → Health check endpoint                      │  │
+│   │  /api/auth           → Register, Login, JWT auth              │  │
+│   │  /api/workspaces     → Create, list, manage workspaces        │  │
+│   │  /api/feedback       → Import, clean, categorize feedback     │  │
+│   │  /api/insights       → Themes, pain points, feature clusters  │  │
+│   │  /api/prd (M3)       → AI PRD generation, Markdown export     │  │
+│   │  /api/user-stories(M3)→ Agile stories, Gherkin criteria, DoD   │  │
+│   │  /api/prioritization(M3)→ RICE, 2x2 Matrix, MoSCoW, Weighted   │  │
+│   │  /api/copilot (M3)   → Grounded multi-turn conversational AI   │  │
+│   │  /api/health         → Health check endpoint                  │  │
 │   │                                                               │  │
 │   └───────────────────────────┬───────────────────────────────────┘  │
 │                               │                                      │
 │   ┌─────────────── SERVICES LAYER ──────────────────────────────┐   │
 │   │                                                              │   │
-│   │  preprocessing.py    → Text normalization, tokenization      │   │
-│   │  data_cleaning.py    → Sanitization, dedup, missing values   │   │
-│   │  categorization.py   → Rule-based category + sentiment       │   │
-│   │  theme_extraction.py → NLP theme mining + pain point detect  │   │
-│   │  clustering.py       → Feature request semantic clustering   │   │
-│   │  trend_analysis.py   → Temporal sentiment + health scoring   │   │
-│   │  ai_service.py       → Groq LLM integration (optional)      │   │
+│   │  prd_service.py           → Generative AI PRD synthesis      │   │
+│   │  user_story_service.py    → Agile decomposition engine       │   │
+│   │  prioritization_service.py→ Configurable scoring frameworks  │   │
+│   │  copilot_service.py       → Grounded PM assistant & chat     │   │
+│   │  theme_extraction.py      → NLP theme mining & pain points   │   │
+│   │  clustering.py            → Feature request semantic cluster │   │
+│   │  trend_analysis.py        → Sentiment trajectory & health    │   │
+│   │  ai_service.py            → Gemini 3.6 Flash & Groq fallback │   │
 │   │                                                              │   │
 │   └──────────────────────────┬───────────────────────────────────┘   │
 │                              │                                       │
@@ -402,6 +413,56 @@ Milestone 2 adds the full intelligence and analytics layer:
 
 ---
 
+## Milestone 3 — Planning & Requirements Generation Workspace (Completed ✅)
+
+Milestone 3 implements the complete Planning & Requirements Workspace powered by Generative AI:
+
+1. **Generative AI PRD Generation (`/api/prd`)**
+   - Integrates Google Gemini (`gemini-3.6-flash`, 1,000,000 token context window) with Groq and deterministic fallback engines.
+   - Grounded 100% in real customer feedback, user reviews, and pain points.
+   - Comprehensive PRD structure:
+     - Executive Summary & Context
+     - Problem Statement & Customer Evidence
+     - Target User Personas (Frictions, Motivations, Goals)
+     - Strategic Goals & Quantitative OKRs
+     - Scope Definition (In-Scope vs. Out-of-Scope)
+     - Key User Journeys (Discovery, Execution, Outcome)
+     - Functional Requirements (ID, P0/P1/P2 priorities, acceptance criteria, edge cases)
+     - Non-Functional Requirements (Performance SLAs, Security, Scalability, WCAG Accessibility)
+     - Success Metrics & KPIs Table (Baselines, Targets, Telemetry Mechanisms)
+     - Technical Dependencies & Risks Mitigation Matrix
+   - Export options: One-click copy, download as GitHub-flavored Markdown (.md), and direct user story generation.
+
+2. **Automated User Story & Acceptance Criteria Generation (`/api/user-stories`)**
+   - Decomposes PRDs, feature clusters, or custom initiatives into vertical sprint-ready user stories.
+   - Standard Agile format: `"As a <role>, I want to <action>, so that <benefit>."`
+   - Gherkin-syntax Acceptance Criteria: Scenario with `Given`, `When`, `Then` blocks.
+   - Fibonacci Story Points (`1, 2, 3, 5, 8, 13`) and T-Shirt sizing (`XS, S, M, L, XL`).
+   - Definition of Done (DoD) checklist and technical architectural notes.
+   - Interactive Kanban Board (Backlog → In Progress → In Review/QA → Done) and List/Table view with CSV export.
+
+3. **Feature Prioritization with Configurable Scoring Frameworks (`/api/prioritization`)**
+   - Four industry-standard prioritization frameworks in a single unified interface:
+     - **RICE Scoring**: `(Reach × Impact × Confidence) / Effort` with inline interactive sliders and instant rank reordering.
+     - **Value vs Effort (2x2 Matrix)**: Interactive scatter plot with automatic quadrant mapping:
+       - ⚡ *Quick Wins* (High Value, Low Effort)
+       - 🚀 *Major Projects* (High Value, High Effort)
+       - 🛠️ *Fill-ins* (Low Value, Low Effort)
+       - ⏳ *Thankless Tasks* (Low Value, High Effort)
+     - **MoSCoW Method**: Interactive 4-column board (Must Have, Should Have, Could Have, Won't Have).
+     - **Custom Weighted Scoring**: Dynamic sliders for Customer Demand (%), Business Impact (%), Technical Feasibility (%), and Risk Mitigation (%) with live-updating leaderboards.
+   - **Auto-Seed from Feedback**: One-click extraction from Milestone 2 Feature Clusters and Pain Points.
+   - **AI Re-Score All**: Leverages Google Gemini to calibrate parameters based on customer demand and sentiment severity.
+
+4. **Conversational Product Intelligence Assistant / Copilot (`/api/copilot`)**
+   - Grounded conversational AI assistant (PM Copilot) with real-time access to workspace feedback, pain points, themes, and PRDs.
+   - Dedicated Copilot Page (`/copilot`) plus a global **Floating Copilot Widget** accessible from any page.
+   - Multi-turn conversation capability with chat history persistence per workspace session.
+   - Sources Cited citations: Points directly to supporting feedback quotes, customer volume, and themes.
+   - Quick suggested follow-up chips and interactive shortcut buttons ("Generate PRD for this", "User Stories").
+
+---
+
 ## Setup & Installation
 
 ### Prerequisites
@@ -475,28 +536,32 @@ GROQ_API_KEY=gsk_your_groq_api_key_here
 cd backend
 
 # Milestone 1 validation
-python -m pytest tests/test_milestone1.py -v
+python -m unittest tests/test_milestone1.py
 
 # Milestone 2 validation
-python -m pytest tests/test_milestone2.py -v
+python -m unittest tests/test_milestone2.py
 
-# Performance benchmark (10k+ records)
-python -m pytest tests/test_10k_benchmark.py -v
+# Milestone 3 validation (PRD, Stories, Prioritization, Copilot)
+python -m unittest tests/test_milestone3.py
+
+# Milestone 3 Integration pipeline
+python -m unittest tests/test_milestone3_integration.py
+
+# Run all milestone tests together (22 unit & integration tests)
+python -m unittest tests/test_milestone1.py tests/test_milestone2.py tests/test_milestone3.py tests/test_milestone3_integration.py
 ```
 
 ---
 
-## Future Roadmap
+## Future Roadmap (Milestone 4 — Planned)
 
-The following features are planned for future milestones:
+The following features are planned for Milestone 4 (Week 7-8):
 
-- 🔮 AI-generated PRDs (Product Requirement Documents)
-- 📝 Automated user story generation
-- 🗺️ Roadmap planning and prioritization
-- 🤝 Engineering coordination workflows
-- 🎙️ Meeting transcript processing and analysis
-- 📊 Advanced forecasting and recommendation algorithms
-- 🔗 Integrations with Jira, Slack, Intercom, and other PM tools
+- 🗺️ Automated Roadmap Planning & Gantt Visualization
+- 🎯 Release Milestones Recommendation Engine
+- 📊 Executive Strategy Reports & PDF Generation
+- 🔗 Integrations with Jira, Linear, and GitHub Issues
+- 🎙️ Meeting Transcript Processing & Ingestion
 
 ---
 

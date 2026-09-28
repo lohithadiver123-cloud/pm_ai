@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { accent, palette, sentiment, severity, demand, getCategoryColor } from '../theme';
+import { Segmented } from './ui';
 
 /**
  * Clean SVG Donut Chart for Sentiment Breakdown with Center Health Metric
@@ -8,14 +10,14 @@ export function SentimentDonutChart({ positive = 0, neutral = 0, negative = 0, h
 
   const total = (positive || 0) + (neutral || 0) + (negative || 0);
   const data = [
-    { label: 'Positive', count: positive, color: '#10B981', bg: 'rgba(16, 185, 129, 0.12)' },
-    { label: 'Neutral', count: neutral, color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.12)' },
-    { label: 'Negative', count: negative, color: '#EF4444', bg: 'rgba(239, 68, 68, 0.12)' },
+    { label: 'Positive', count: positive, color: sentiment.positive.line, bg: sentiment.positive.soft },
+    { label: 'Neutral', count: neutral, color: sentiment.neutral.line, bg: sentiment.neutral.soft },
+    { label: 'Negative', count: negative, color: sentiment.negative.line, bg: sentiment.negative.soft },
   ];
 
   if (total === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+      <div style={{ textAlign: 'center', padding: 'var(--sp-4)', color: 'var(--text-muted)' }}>
         No sentiment data available
       </div>
     );
@@ -47,7 +49,7 @@ export function SentimentDonutChart({ positive = 0, neutral = 0, negative = 0, h
   const activeSlice = hoveredIndex !== null ? slices[hoveredIndex] : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', width: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-3)', width: '100%' }}>
       <div style={{ position: 'relative', width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
           {/* Background circle track */}
@@ -99,19 +101,19 @@ export function SentimentDonutChart({ positive = 0, neutral = 0, negative = 0, h
         >
           {activeSlice ? (
             <>
-              <span style={{ fontSize: '22px', fontWeight: 700, color: activeSlice.color }}>
+              <span style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: activeSlice.color }}>
                 {activeSlice.percent}%
               </span>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
                 {activeSlice.label} ({activeSlice.count})
               </span>
             </>
           ) : (
             <>
-              <span style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text)' }}>
+              <span style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, color: 'var(--text)' }}>
                 {healthScore !== null ? `${healthScore}%` : `${slices[0].percent}%`}
               </span>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Health Score
               </span>
             </>
@@ -120,7 +122,7 @@ export function SentimentDonutChart({ positive = 0, neutral = 0, negative = 0, h
       </div>
 
       {/* Legend Chips */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap', width: '100%' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap', width: '100%' }}>
         {slices.map((slice) => (
           <div
             key={slice.label}
@@ -129,14 +131,14 @@ export function SentimentDonutChart({ positive = 0, neutral = 0, negative = 0, h
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '20px',
+              gap: 'var(--sp-2)',
+              padding: 'var(--sp-2) var(--sp-3)',
+              borderRadius: 'var(--radius-full)',
               backgroundColor: hoveredIndex === slice.idx ? slice.bg : 'var(--bg)',
               border: `1px solid ${hoveredIndex === slice.idx ? slice.color : 'var(--border)'}`,
               cursor: 'pointer',
               transition: 'all 0.15s ease',
-              fontSize: '12px',
+              fontSize: 'var(--fs-xs)',
             }}
           >
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: slice.color }}></span>
@@ -147,37 +149,6 @@ export function SentimentDonutChart({ positive = 0, neutral = 0, negative = 0, h
       </div>
     </div>
   );
-}
-
-// Vibrant, distinct, high-contrast category palette
-export const categoryColors = {
-  feature_request: '#2563EB',    // Radiant Royal Blue
-  bug_report: '#EF4444',         // Vivid Coral / Crimson Red
-  performance_issue: '#F59E0B',  // Vivid Amber Gold
-  ui_ux: '#8B5CF6',              // Radiant Violet / Purple
-  general_feedback: '#10B981',   // Crisp Emerald Green
-  customer_support: '#EC4899',   // Vivid Fuchsia / Pink
-  integration: '#06B6D4',        // Bright Cyan
-  security: '#6366F1',           // Indigo
-};
-
-export const defaultCategoryPalette = [
-  '#2563EB', // Blue
-  '#EF4444', // Red
-  '#F59E0B', // Amber
-  '#8B5CF6', // Purple
-  '#10B981', // Emerald
-  '#EC4899', // Pink
-  '#06B6D4', // Cyan
-  '#6366F1', // Indigo
-  '#14B8A6', // Teal
-  '#F97316', // Orange
-];
-
-export function getCategoryColor(category, idx = 0) {
-  if (!category) return defaultCategoryPalette[idx % defaultCategoryPalette.length];
-  const normalized = category.toLowerCase().trim().replace(/[\s-]+/g, '_');
-  return categoryColors[normalized] || defaultCategoryPalette[idx % defaultCategoryPalette.length];
 }
 
 /**
@@ -195,7 +166,7 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
 
   if (total === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+      <div style={{ textAlign: 'center', padding: 'var(--sp-4)', color: 'var(--text-muted)' }}>
         No category distribution data available
       </div>
     );
@@ -230,65 +201,23 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
   const activeSlice = hoveredCategory !== null ? slices.find((s) => s.category === hoveredCategory) : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', width: '100%' }}>
-      {/* View Switcher Tabs */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', background: 'var(--bg)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)', alignSelf: 'center' }}>
-        <button
-          onClick={() => setViewMode('donut')}
-          style={{
-            padding: '4px 12px',
-            fontSize: '11px',
-            fontWeight: 600,
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            backgroundColor: viewMode === 'donut' ? 'var(--bg-card)' : 'transparent',
-            color: viewMode === 'donut' ? 'var(--text)' : 'var(--text-muted)',
-            boxShadow: viewMode === 'donut' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          Donut Chart
-        </button>
-        <button
-          onClick={() => setViewMode('bars')}
-          style={{
-            padding: '4px 12px',
-            fontSize: '11px',
-            fontWeight: 600,
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            backgroundColor: viewMode === 'bars' ? 'var(--bg-card)' : 'transparent',
-            color: viewMode === 'bars' ? 'var(--text)' : 'var(--text-muted)',
-            boxShadow: viewMode === 'bars' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          Ranked Bars
-        </button>
-        <button
-          onClick={() => setViewMode('grid')}
-          style={{
-            padding: '4px 12px',
-            fontSize: '11px',
-            fontWeight: 600,
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            backgroundColor: viewMode === 'grid' ? 'var(--bg-card)' : 'transparent',
-            color: viewMode === 'grid' ? 'var(--text)' : 'var(--text-muted)',
-            boxShadow: viewMode === 'grid' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          Matrix Grid
-        </button>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', width: '100%' }}>
+      {/* View switcher — the kit's segmented control, so every view toggle in the app matches. */}
+      <Segmented
+        className="segmented-center"
+        label="Category chart view"
+        value={viewMode}
+        onChange={setViewMode}
+        options={[
+          { value: 'donut', label: 'Donut', icon: 'dot' },
+          { value: 'bars', label: 'Bars', icon: 'barChart' },
+          { value: 'grid', label: 'Grid', icon: 'grid' },
+        ]}
+      />
 
       {/* MODE 1: DONUT VIEW */}
       {viewMode === 'donut' && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-3)', width: '100%' }}>
           <div style={{ position: 'relative', width: size, height: size }}>
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
               <circle
@@ -335,40 +264,95 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
                 alignItems: 'center',
                 justifyContent: 'center',
                 pointerEvents: 'none',
-                padding: '12px',
+                padding: 'var(--sp-3)',
                 textAlign: 'center',
               }}
             >
               {activeSlice ? (
                 <>
-                  <span style={{ fontSize: '20px', fontWeight: 800, color: activeSlice.color }}>
+                  <span style={{ fontSize: 'var(--fs-lg)', fontWeight: 800, color: activeSlice.color }}>
                     {activeSlice.percent}%
                   </span>
-                  <span style={{ fontSize: '11px', color: 'var(--text)', fontWeight: 600, textTransform: 'capitalize' }}>
+                  <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text)', fontWeight: 600, textTransform: 'capitalize' }}>
                     {activeSlice.label}
                   </span>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
                     ({activeSlice.count} items)
                   </span>
                 </>
               ) : (
                 <>
-                  <span style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text)' }}>
+                  <span style={{ fontSize: 'var(--fs-xl)', fontWeight: 800, color: 'var(--text)' }}>
                     {total}
                   </span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                  <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontWeight: 600 }}>
                     Total Items
                   </span>
                 </>
               )}
             </div>
           </div>
+
+          {/* Category Progress List under Donut */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', width: '100%', marginTop: 'var(--sp-1)' }}>
+            {slices.map((slice) => (
+              <div
+                key={slice.category}
+                onMouseEnter={() => setHoveredCategory(slice.category)}
+                onMouseLeave={() => setHoveredCategory(null)}
+                onClick={() => onSelectCategory && onSelectCategory(slice.category)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--sp-1)',
+                  cursor: 'pointer',
+                  opacity: hoveredCategory === null || hoveredCategory === slice.category ? 1 : 0.5,
+                  transition: 'opacity 0.2s ease',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 'var(--sp-2)',
+                      padding: 'var(--sp-1) var(--sp-2)',
+                      borderRadius: 'var(--radius-lg)',
+                      backgroundColor: `${slice.color}14`,
+                      border: `1px solid ${slice.color}40`,
+                      fontSize: 'var(--fs-xs)',
+                      fontWeight: 600,
+                      color: slice.color,
+                      textTransform: 'lowercase',
+                    }}
+                  >
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: slice.color }}></span>
+                    {slice.label}
+                  </div>
+                  <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-muted)' }}>
+                    {slice.count} <span style={{ fontWeight: 400, fontSize: 'var(--fs-xs)' }}>({slice.percent}%)</span>
+                  </span>
+                </div>
+                <div style={{ height: '5px', width: '100%', backgroundColor: 'var(--bg-subtle)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${slice.percent}%`,
+                      backgroundColor: slice.color,
+                      borderRadius: 'var(--radius-sm)',
+                      transition: 'width 0.4s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {/* MODE 2: RANKED BARS VIEW */}
       {viewMode === 'bars' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', padding: '4px 0' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', width: '100%', padding: 'var(--sp-1) 0' }}>
           {slices.map((slice) => (
             <div
               key={slice.category}
@@ -376,31 +360,31 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
               onMouseLeave={() => setHoveredCategory(null)}
               onClick={() => onSelectCategory && onSelectCategory(slice.category)}
               style={{
-                padding: '8px 12px',
-                borderRadius: '8px',
+                padding: 'var(--sp-2) var(--sp-3)',
+                borderRadius: 'var(--radius)',
                 backgroundColor: hoveredCategory === slice.category ? `${slice.color}10` : 'var(--bg)',
                 border: `1px solid ${hoveredCategory === slice.category ? slice.color : 'var(--border)'}`,
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', fontSize: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)', fontSize: 'var(--fs-xs)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
                   <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: slice.color }}></span>
                   <strong style={{ color: 'var(--text)', textTransform: 'capitalize' }}>{slice.label}</strong>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
                   <span style={{ fontWeight: 700, color: slice.color }}>{slice.percent}%</span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>({slice.count} items)</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>({slice.count} items)</span>
                 </div>
               </div>
-              <div style={{ height: '7px', borderRadius: '4px', backgroundColor: 'var(--border)', overflow: 'hidden' }}>
+              <div style={{ height: '7px', borderRadius: 'var(--radius-sm)', backgroundColor: 'var(--border)', overflow: 'hidden' }}>
                 <div
                   style={{
                     width: `${slice.percent}%`,
                     height: '100%',
                     backgroundColor: slice.color,
-                    borderRadius: '4px',
+                    borderRadius: 'var(--radius-sm)',
                     transition: 'width 0.4s ease',
                   }}
                 />
@@ -412,7 +396,7 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
 
       {/* MODE 3: MATRIX GRID VIEW */}
       {viewMode === 'grid' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', width: '100%' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 'var(--sp-2)', width: '100%' }}>
           {slices.map((slice) => (
             <div
               key={slice.category}
@@ -420,8 +404,8 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
               onMouseLeave={() => setHoveredCategory(null)}
               onClick={() => onSelectCategory && onSelectCategory(slice.category)}
               style={{
-                padding: '12px 10px',
-                borderRadius: '8px',
+                padding: 'var(--sp-3) var(--sp-2)',
+                borderRadius: 'var(--radius)',
                 backgroundColor: hoveredCategory === slice.category ? `${slice.color}15` : 'var(--bg)',
                 border: `1px solid ${hoveredCategory === slice.category ? slice.color : 'var(--border)'}`,
                 borderTop: `3px solid ${slice.color}`,
@@ -430,13 +414,13 @@ export function CategoryPieChart({ categoryDistribution = {}, totalFeedback = 0,
                 transition: 'all 0.15s ease',
               }}
             >
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'capitalize', marginBottom: '4px' }}>
+              <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'capitalize', marginBottom: 'var(--sp-1)' }}>
                 {slice.label}
               </div>
-              <div style={{ fontSize: '20px', fontWeight: 800, color: slice.color }}>
+              <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 800, color: slice.color }}>
                 {slice.count}
               </div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text)', marginTop: '2px' }}>
+              <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text)', marginTop: 'var(--sp-1)' }}>
                 {slice.percent}% share
               </div>
             </div>
@@ -455,7 +439,7 @@ export function TrendAreaChart({ trends = [] }) {
 
   if (!trends || trends.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+      <div style={{ textAlign: 'center', padding: 'var(--sp-5)', color: 'var(--text-muted)' }}>
         No trend records available to visualize yet.
       </div>
     );
@@ -507,12 +491,8 @@ export function TrendAreaChart({ trends = [] }) {
         <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
           <defs>
             <linearGradient id="totalGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#355C52" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="#355C52" stopOpacity="0.02" />
-            </linearGradient>
-            <linearGradient id="posGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#2E7D32" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#2E7D32" stopOpacity="0.0" />
+              <stop offset="0%" stopColor={accent.line} stopOpacity="0.18" />
+              <stop offset="100%" stopColor={accent.line} stopOpacity="0.01" />
             </linearGradient>
           </defs>
 
@@ -548,9 +528,9 @@ export function TrendAreaChart({ trends = [] }) {
           <path d={totalArea} fill="url(#totalGrad)" />
 
           {/* Lines */}
-          <path d={totalLine} fill="none" stroke="#355C52" strokeWidth="2.5" />
-          <path d={posLine} fill="none" stroke="#2E7D32" strokeWidth="2" strokeDasharray="5 3" />
-          <path d={negLine} fill="none" stroke="#C62828" strokeWidth="2" strokeDasharray="5 3" />
+          <path d={totalLine} fill="none" stroke={accent.line} strokeWidth="2.5" />
+          <path d={posLine} fill="none" stroke={sentiment.positive.line} strokeWidth="2" strokeDasharray="5 3" />
+          <path d={negLine} fill="none" stroke={sentiment.negative.line} strokeWidth="2" strokeDasharray="5 3" />
 
           {/* Data Points */}
           {trends.map((t, idx) => {
@@ -579,7 +559,7 @@ export function TrendAreaChart({ trends = [] }) {
                     y1={padding.top}
                     x2={x}
                     y2={padding.top + chartHeight}
-                    stroke="#355C52"
+                    stroke={accent.line}
                     strokeWidth="1.5"
                     strokeDasharray="3 3"
                   />
@@ -590,8 +570,8 @@ export function TrendAreaChart({ trends = [] }) {
                   cx={x}
                   cy={y}
                   r={isHovered ? 6 : 4}
-                  fill={isHovered ? '#203C35' : '#355C52'}
-                  stroke="#FFFFFF"
+                  fill={isHovered ? accent.strong : accent.line}
+                  stroke={palette.surface}
                   strokeWidth="2"
                   style={{ transition: 'all 0.15s ease' }}
                 />
@@ -622,36 +602,36 @@ export function TrendAreaChart({ trends = [] }) {
               right: '20px',
               backgroundColor: 'var(--bg-card)',
               border: '1px solid var(--border)',
-              borderRadius: '8px',
-              padding: '10px 14px',
+              borderRadius: 'var(--radius)',
+              padding: 'var(--sp-2) var(--sp-3)',
               boxShadow: 'var(--shadow-md)',
-              fontSize: '12px',
+              fontSize: 'var(--fs-xs)',
               zIndex: 10,
               pointerEvents: 'none',
               minWidth: '180px',
             }}
           >
-            <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: '4px' }}>
+            <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 'var(--sp-1)' }}>
               {hoveredPoint.period}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
-              <span style={{ color: '#355C52', fontWeight: 600 }}>Total Volume:</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', margin: 'var(--sp-1) 0' }}>
+              <span style={{ color: accent.line, fontWeight: 600 }}>Total Volume:</span>
               <strong>{hoveredPoint.total_count}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
-              <span style={{ color: '#2E7D32' }}>Positive:</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', margin: 'var(--sp-1) 0' }}>
+              <span style={{ color: sentiment.positive.line }}>Positive:</span>
               <span>{hoveredPoint.positive_count}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
-              <span style={{ color: '#E65100' }}>Neutral:</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', margin: 'var(--sp-1) 0' }}>
+              <span style={{ color: sentiment.neutral.line }}>Neutral:</span>
               <span>{hoveredPoint.neutral_count}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
-              <span style={{ color: '#C62828' }}>Negative:</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', margin: 'var(--sp-1) 0' }}>
+              <span style={{ color: sentiment.negative.line }}>Negative:</span>
               <span>{hoveredPoint.negative_count}</span>
             </div>
             {hoveredPoint.top_category && (
-              <div style={{ marginTop: '6px', paddingTop: '4px', borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+              <div style={{ marginTop: 'var(--sp-2)', paddingTop: 'var(--sp-1)', borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                 Top: <strong>{hoveredPoint.top_category.replace(/_/g, ' ')}</strong>
               </div>
             )}
@@ -660,17 +640,17 @@ export function TrendAreaChart({ trends = [] }) {
       </div>
 
       {/* Graph Legend */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '10px', fontSize: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ width: '16px', height: '3px', backgroundColor: '#355C52', display: 'inline-block' }}></span>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--sp-4)', marginTop: 'var(--sp-2)', fontSize: 'var(--fs-xs)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <span style={{ width: '16px', height: '3px', backgroundColor: accent.line, display: 'inline-block' }}></span>
           <span style={{ color: 'var(--text)', fontWeight: 600 }}>Total Feedback Volume</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ width: '16px', height: '2px', backgroundColor: '#2E7D32', borderTop: '1px dashed #2E7D32', display: 'inline-block' }}></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <span style={{ width: '16px', height: '2px', backgroundColor: sentiment.positive.line, display: 'inline-block' }}></span>
           <span style={{ color: 'var(--text-muted)' }}>Positive Trajectory</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ width: '16px', height: '2px', backgroundColor: '#C62828', borderTop: '1px dashed #C62828', display: 'inline-block' }}></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <span style={{ width: '16px', height: '2px', backgroundColor: sentiment.negative.line, display: 'inline-block' }}></span>
           <span style={{ color: 'var(--text-muted)' }}>Negative Trajectory</span>
         </div>
       </div>
@@ -696,50 +676,50 @@ export function SeverityBarChart({ painPoints = [] }) {
   const avgImpact = Math.round(painPoints.reduce((acc, p) => acc + (p.impact_score || 0), 0) / total);
 
   return (
-    <div style={{ marginTop: '12px', padding: '12px 14px', backgroundColor: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '12px' }}>
+    <div style={{ marginTop: 'var(--sp-3)', padding: 'var(--sp-3)', backgroundColor: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)', fontSize: 'var(--fs-xs)' }}>
         <span style={{ fontWeight: 600, color: 'var(--text)' }}>
           Severity Breakdown ({total} Active Issues)
         </span>
         <span style={{ color: 'var(--text-muted)' }}>
-          Avg Friction Impact Score: <strong style={{ color: '#A8534C' }}>{avgImpact}/100</strong>
+          Avg Friction Impact Score: <strong style={{ color: 'var(--text)' }}>{avgImpact}/100</strong>
         </span>
       </div>
 
       {/* Stacked Bar */}
-      <div style={{ height: '10px', borderRadius: '5px', overflow: 'hidden', display: 'flex', backgroundColor: 'var(--border)' }}>
+      <div style={{ height: '10px', borderRadius: 'var(--radius-sm)', overflow: 'hidden', display: 'flex', backgroundColor: 'var(--border)' }}>
         {high > 0 && (
           <div
-            style={{ width: `${highPct}%`, backgroundColor: '#C62828', transition: 'width 0.3s ease' }}
+            style={{ width: `${highPct}%`, backgroundColor: severity.high.line, transition: 'width 0.3s ease' }}
             title={`High Severity: ${high} issues (${highPct}%)`}
           />
         )}
         {med > 0 && (
           <div
-            style={{ width: `${medPct}%`, backgroundColor: '#B88232', transition: 'width 0.3s ease' }}
+            style={{ width: `${medPct}%`, backgroundColor: severity.medium.line, transition: 'width 0.3s ease' }}
             title={`Medium Severity: ${med} issues (${medPct}%)`}
           />
         )}
         {low > 0 && (
           <div
-            style={{ width: `${lowPct}%`, backgroundColor: '#355C52', transition: 'width 0.3s ease' }}
+            style={{ width: `${lowPct}%`, backgroundColor: severity.low.line, transition: 'width 0.3s ease' }}
             title={`Low Severity: ${low} issues (${lowPct}%)`}
           />
         )}
       </div>
 
       {/* Legend & Counts */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '11px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#C62828' }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#C62828' }}></span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--sp-2)', fontSize: 'var(--fs-xs)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', color: severity.high.line }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: severity.high.line }}></span>
           <strong>{high} High</strong> ({highPct}%)
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#B88232' }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#B88232' }}></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', color: severity.medium.line }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: severity.medium.line }}></span>
           <strong>{med} Medium</strong> ({medPct}%)
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#355C52' }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#355C52' }}></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', color: severity.low.line }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: severity.low.line }}></span>
           <strong>{low} Low</strong> ({lowPct}%)
         </div>
       </div>
@@ -755,7 +735,7 @@ export function FeaturePriorityChart({ clusters = [] }) {
 
   if (!clusters || clusters.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+      <div style={{ textAlign: 'center', padding: 'var(--sp-4)', color: 'var(--text-muted)' }}>
         No feature request clusters found.
       </div>
     );
@@ -765,17 +745,19 @@ export function FeaturePriorityChart({ clusters = [] }) {
   const topClusters = clusters.slice(0, 6);
 
   const demandColors = {
-    high: { bar: '#355C52', badgeBg: 'rgba(53, 92, 82, 0.12)', text: '#203C35' },
-    medium: { bar: '#B88232', badgeBg: 'rgba(184, 130, 50, 0.12)', text: '#B88232' },
-    low: { bar: '#707570', badgeBg: 'rgba(112, 117, 112, 0.12)', text: '#707570' },
+    high: { bar: demand.high.line, badgeBg: demand.high.soft, text: demand.high.line },
+    medium: { bar: demand.medium.line, badgeBg: demand.medium.soft, text: demand.medium.line },
+    low: { bar: demand.low.line, badgeBg: demand.low.soft, text: demand.low.line },
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', width: '100%', position: 'relative' }}>
       {topClusters.map((cluster) => {
         const colors = demandColors[cluster.demand_level] || demandColors.medium;
         const score = cluster.priority_score || 0;
         const isHovered = hoveredCluster?.id === cluster.id;
+        const reqCount = cluster.request_count || 0;
+        const userCount = cluster.unique_customers_count || reqCount;
 
         return (
           <div
@@ -783,8 +765,8 @@ export function FeaturePriorityChart({ clusters = [] }) {
             onMouseEnter={() => setHoveredCluster(cluster)}
             onMouseLeave={() => setHoveredCluster(null)}
             style={{
-              padding: '10px 14px',
-              borderRadius: '8px',
+              padding: 'var(--sp-2) var(--sp-3)',
+              borderRadius: 'var(--radius)',
               border: `1px solid ${isHovered ? colors.bar : 'var(--border)'}`,
               backgroundColor: isHovered ? 'var(--bg-card)' : 'var(--bg)',
               boxShadow: isHovered ? 'var(--shadow-md)' : 'none',
@@ -793,18 +775,18 @@ export function FeaturePriorityChart({ clusters = [] }) {
             }}
           >
             {/* Header: Name, Demand Badge, Priority Score */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: 'var(--fs-sm)' }}>
                   {cluster.cluster_name}
                 </span>
                 <span
                   style={{
-                    fontSize: '10px',
+                    fontSize: 'var(--fs-xs)',
                     fontWeight: 700,
                     textTransform: 'uppercase',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
+                    padding: 'var(--sp-1) var(--sp-2)',
+                    borderRadius: 'var(--radius-sm)',
                     backgroundColor: colors.badgeBg,
                     color: colors.text,
                   }}
@@ -812,28 +794,30 @@ export function FeaturePriorityChart({ clusters = [] }) {
                   {cluster.demand_level} Demand
                 </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Priority:</span>
-                <strong style={{ fontSize: '14px', color: colors.bar }}>{score}/100</strong>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>Priority:</span>
+                <strong style={{ fontSize: 'var(--fs-sm)', color: colors.bar }}>{score}/100</strong>
               </div>
             </div>
 
             {/* Horizontal Bar */}
-            <div style={{ height: '8px', backgroundColor: 'var(--border)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ height: '8px', backgroundColor: 'var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
               <div
                 style={{
                   width: `${score}%`,
                   height: '100%',
                   backgroundColor: colors.bar,
-                  borderRadius: '4px',
+                  borderRadius: 'var(--radius-sm)',
                   transition: 'width 0.4s ease',
                 }}
               />
             </div>
 
             {/* Subtext: Counts & Breadth */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
-              <span>{cluster.request_count} requests • {cluster.unique_customers_count || cluster.request_count} unique users</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--sp-2)', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+              <span>
+                {reqCount} {reqCount === 1 ? 'request' : 'requests'} • {userCount} {userCount === 1 ? 'unique user' : 'unique users'}
+              </span>
               {isHovered && cluster.score_breakdown && (
                 <span style={{ color: 'var(--text)', fontWeight: 500 }}>
                   {cluster.score_breakdown.formula_weights}
@@ -846,3 +830,4 @@ export function FeaturePriorityChart({ clusters = [] }) {
     </div>
   );
 }
+

@@ -1,52 +1,52 @@
-/**
- * Login page.
- * Email + password form that calls /api/auth/login.
- * Stores JWT token and user data in localStorage on success.
- */
-import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { Alert, Button, Input } from '../components/ui';
 
-function Login() {
+/**
+ * Sign in.
+ *
+ * One field group pattern, one primary action, errors summarised at the top of
+ * the form so they are announced rather than hidden beside a field.
+ */
+export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('pm_copilot_token');
-    if (token) {
+    if (localStorage.getItem('pm_copilot_token')) {
       navigate('/dashboard', { replace: true });
     }
   }, [navigate]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
+  const validate = () => {
+    const next = {};
+    if (!email.trim()) next.email = 'Enter your email address.';
+    else if (!/^\S+@\S+\.\S+$/.test(email.trim())) next.email = 'That does not look like an email address.';
+    if (!password) next.password = 'Enter your password.';
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
 
-    if (!email || !password) {
-      setError('Please fill in all fields.');
-      return;
-    }
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setFormError('');
+    if (!validate()) return;
 
     setLoading(true);
     try {
-      const response = await api.post('/auth/login', {
-        email: email.trim(),
-        password,
-      });
-
-      // Store token and user data
-      localStorage.setItem('pm_copilot_token', response.data.access_token);
-      localStorage.setItem('pm_copilot_user', JSON.stringify(response.data.user));
-
-      // Redirect to dashboard
+      const { data } = await api.post('/auth/login', { email: email.trim(), password });
+      localStorage.setItem('pm_copilot_token', data.access_token);
+      localStorage.setItem('pm_copilot_user', JSON.stringify(data.user));
       navigate('/dashboard');
     } catch (err) {
-      const message =
-        err.response?.data?.detail || 'Login failed. Please check your credentials.';
-      setError(message);
+      setFormError(
+        err.response?.data?.detail || 'Could not sign you in. Check your email and password.'
+      );
     } finally {
       setLoading(false);
     }
@@ -55,53 +55,56 @@ function Login() {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <div className="auth-header">
+        <header className="auth-header">
           <h1 className="auth-title">
             <span className="brand-highlight">PM</span> Copilot
           </h1>
-          <p className="auth-subtitle">Sign in to your account</p>
-        </div>
+          <p className="auth-subtitle">
+            Turn scattered customer feedback into themes, pain points and a prioritised roadmap.
+          </p>
+        </header>
 
-        {error && <div className="alert alert-error">{error}</div>}
-
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              disabled={loading}
-            />
+        {formError && (
+          <div style={{ marginBottom: 'var(--sp-4)' }}>
+            <Alert variant="error">{formError}</Alert>
           </div>
+        )}
 
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              autoComplete="current-password"
-              disabled={loading}
-            />
-          </div>
+        <form className="auth-form" onSubmit={handleSubmit} noValidate>
+          <Input
+            label="Email"
+            type="email"
+            name="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@company.com"
+            autoComplete="email"
+            autoFocus
+            error={errors.email}
+            disabled={loading}
+          />
 
-          <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+          <Input
+            label="Password"
+            type="password"
+            name="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Your password"
+            autoComplete="current-password"
+            error={errors.password}
+            disabled={loading}
+          />
+
+          <Button type="submit" variant="primary" fullWidth loading={loading}>
+            {loading ? 'Signing in…' : 'Sign in'}
+          </Button>
         </form>
 
         <p className="auth-footer">
-          Don't have an account? <Link to="/register">Create one</Link>
+          No account yet? <Link to="/register">Create one</Link>
         </p>
       </div>
     </div>
   );
 }
-
-export default Login;

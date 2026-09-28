@@ -1,308 +1,371 @@
-/**
- * FeedbackList page.
- * Table showing feedback with filters, pagination, clean, and categorize actions.
- */
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { sentiment as sentimentTones } from '../theme';
+import { useBusy } from '../context/BusyContext';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Select,
+  SkeletonTable,
+  Toolbar,
+} from '../components/ui';
 
 const CATEGORIES = [
-  { value: '', label: 'All Categories' },
-  { value: 'bug_report', label: 'Bug Report' },
-  { value: 'feature_request', label: 'Feature Request' },
-  { value: 'performance_issue', label: 'Performance Issue' },
-  { value: 'general_feedback', label: 'General Feedback' },
+  { value: '', label: 'All categories' },
+  { value: 'bug_report', label: 'Bug report' },
+  { value: 'feature_request', label: 'Feature request' },
+  { value: 'performance_issue', label: 'Performance issue' },
+  { value: 'general_feedback', label: 'General feedback' },
 ];
 
 const SENTIMENTS = [
-  { value: '', label: 'All Sentiments' },
+  { value: '', label: 'All sentiments' },
   { value: 'positive', label: 'Positive' },
   { value: 'neutral', label: 'Neutral' },
   { value: 'negative', label: 'Negative' },
 ];
 
 const SOURCES = [
-  { value: '', label: 'All Sources' },
-  { value: 'app_review', label: 'App Review' },
-  { value: 'support_ticket', label: 'Support Ticket' },
+  { value: '', label: 'All sources' },
+  { value: 'app_review', label: 'App review' },
+  { value: 'support_ticket', label: 'Support ticket' },
   { value: 'survey', label: 'Survey' },
-  { value: 'social_media', label: 'Social Media' },
+  { value: 'social_media', label: 'Social media' },
   { value: 'email', label: 'Email' },
 ];
 
-function FeedbackList() {
+const SENTIMENT_TONE = { positive: 'success', neutral: 'warning', negative: 'danger' };
+
+function stars(rating) {
+  const n = Math.min(5, Math.max(1, Math.round(rating)));
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+/**
+ * Feedback — the raw records table.
+ *
+ * Filters live in one toolbar above the table, not scattered around it. The
+ * pipeline actions (clean, categorise) are the page's primary actions and show
+ * their progress in the global bar as well as on the button itself.
+ */
+export default function FeedbackList() {
+  const navigate = useNavigate();
+  const { begin } = useBusy();
+
   const [workspaces, setWorkspaces] = useState([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState('');
-  const [feedback, setFeedback] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const [limit] = useState(20);
-  const [totalPages, setTotalPages] = useState(1);
+
   const [category, setCategory] = useState('');
   const [sentiment, setSentiment] = useState('');
   const [source, setSource] = useState('');
-  const [cleaning, setCleaning] = useState(false);
-  const [categorizing, setCategorizing] = useState(false);
-  const [actionMessage, setActionMessage] = useState('');
 
-  // Define fetchWorkspaces
-  const fetchWorkspaces = async () => {
-    try {
-      const response = await api.get('/workspaces');
-      setWorkspaces(response.data);
-      if (response.data.length > 0) {
-        setSelectedWorkspace(response.data[0]._id);
-      }
-    } catch (err) {
-      setError('Failed to load workspaces.');
-    }
-  };
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState(null);
+  const [busyAction, setBusyAction] = useState('');
 
-  // Define fetchFeedback with proper dependencies
   const fetchFeedback = useCallback(async () => {
+    if (!selectedWorkspace) return;
     setLoading(true);
     setError('');
     try {
-      const params = {
-        workspace_id: selectedWorkspace,
-        page,
-        limit,
-      };
+      const params = { workspace_id: selectedWorkspace, page, limit };
       if (category) params.category = category;
       if (sentiment) params.sentiment = sentiment;
       if (source) params.source = source;
 
-      const response = await api.get('/feedback', { params });
-      setFeedback(response.data.items);
-      setTotal(response.data.total);
-      setTotalPages(response.data.total_pages);
-    } catch (err) {
-      setError('Failed to load feedback.');
+      const { data } = await api.get('/feedback', { params });
+      setItems(data.items || []);
+      setTotal(data.total || 0);
+      setTotalPages(data.total_pages || 1);
+    } catch {
+      setError('Could not load feedback for this workspace.');
+      setItems([]);
     } finally {
       setLoading(false);
     }
   }, [selectedWorkspace, page, limit, category, sentiment, source]);
 
-  // Fetch workspaces on mount
   useEffect(() => {
-    fetchWorkspaces();
+    (async () => {
+      try {
+        const { data } = await api.get('/workspaces');
+        setWorkspaces(data);
+        if (data.length > 0) setSelectedWorkspace(data[0]._id);
+        else setLoading(false);
+      } catch {
+        setError('Could not load your workspaces.');
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  // Fetch feedback when workspace, page, or filters change
   useEffect(() => {
-    if (selectedWorkspace) {
-      fetchFeedback();
-    }
-  }, [selectedWorkspace, page, category, sentiment, source, fetchFeedback]);
+    fetchFeedback();
+  }, [fetchFeedback]);
 
-  const handleClean = async () => {
-    setCleaning(true);
-    setActionMessage('');
+  const runPipeline = async (path, label) => {
+    const done = begin(label);
+    setBusyAction(path);
+    setNotice(null);
     try {
-      const formData = new FormData();
-      formData.append('workspace_id', selectedWorkspace);
-      const response = await api.post('/feedback/clean', formData);
-      setActionMessage(response.data.message);
-      fetchFeedback(); // Refresh data
+      const body = new FormData();
+      body.append('workspace_id', selectedWorkspace);
+      const { data } = await api.post(path, body);
+      setNotice({ variant: 'success', text: data.message || `${label} finished.` });
+      await fetchFeedback();
     } catch (err) {
-      setActionMessage('Cleaning failed: ' + (err.response?.data?.detail || 'Unknown error'));
+      setNotice({
+        variant: 'error',
+        text: `${label} failed: ${err.response?.data?.detail || 'unknown error'}`,
+      });
     } finally {
-      setCleaning(false);
+      setBusyAction('');
+      done();
     }
   };
 
-  const handleCategorize = async () => {
-    setCategorizing(true);
-    setActionMessage('');
-    try {
-      const formData = new FormData();
-      formData.append('workspace_id', selectedWorkspace);
-      const response = await api.post('/feedback/categorize', formData);
-      setActionMessage(response.data.message);
-      fetchFeedback(); // Refresh data
-    } catch (err) {
-      setActionMessage('Categorization failed: ' + (err.response?.data?.detail || 'Unknown error'));
-    } finally {
-      setCategorizing(false);
-    }
+  const resetTo = (setter) => (event) => {
+    setter(event.target.value);
+    setPage(1);
   };
 
-  // Reset page when filters change
-  const handleCategoryChange = (e) => { setCategory(e.target.value); setPage(1); };
-  const handleSentimentChange = (e) => { setSentiment(e.target.value); setPage(1); };
-  const handleSourceChange = (e) => { setSource(e.target.value); setPage(1); };
+  const filtered = Boolean(category || sentiment || source);
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Feedback</h1>
-          <p className="page-subtitle">
-            {total > 0 ? `Showing ${feedback.length} of ${total} feedback entries` : 'No feedback yet'}
-          </p>
-        </div>
-        <div className="page-actions">
-          <button
-            className="btn btn-secondary"
-            onClick={handleClean}
-            disabled={cleaning || !selectedWorkspace}
+      <PageHeader
+        icon="inbox"
+        title="Feedback"
+        description="Every imported record. Clean the text, then categorise to unlock themes and sentiment."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              icon="refresh"
+              disabled={!selectedWorkspace}
+              loading={busyAction === '/feedback/clean'}
+              onClick={() => runPipeline('/feedback/clean', 'Cleaning')}
+            >
+              Clean text
+            </Button>
+            <Button
+              variant="primary"
+              icon="zap"
+              disabled={!selectedWorkspace}
+              loading={busyAction === '/feedback/categorize'}
+              onClick={() => runPipeline('/feedback/categorize', 'Categorising')}
+            >
+              Categorise
+            </Button>
+          </>
+        }
+      />
+
+      {notice && <Alert variant={notice.variant}>{notice.text}</Alert>}
+      {error && <Alert variant="error">{error}</Alert>}
+
+      <Toolbar
+        left={
+          <>
+            <Select
+              label="Workspace"
+              value={selectedWorkspace}
+              onChange={(e) => {
+                setSelectedWorkspace(e.target.value);
+                setPage(1);
+              }}
+              disabled={workspaces.length === 0}
+            >
+              {workspaces.length === 0 && <option value="">No workspaces</option>}
+              {workspaces.map((ws) => (
+                <option key={ws._id} value={ws._id}>
+                  {ws.name}
+                </option>
+              ))}
+            </Select>
+
+            <Select label="Category" value={category} onChange={resetTo(setCategory)}>
+              {CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+
+            <Select label="Sentiment" value={sentiment} onChange={resetTo(setSentiment)}>
+              {SENTIMENTS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+
+            <Select label="Source" value={source} onChange={resetTo(setSource)}>
+              {SOURCES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </>
+        }
+        right={
+          filtered && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="x"
+              onClick={() => {
+                setCategory('');
+                setSentiment('');
+                setSource('');
+                setPage(1);
+              }}
+            >
+              Clear filters
+            </Button>
+          )
+        }
+      />
+
+      <Card flush>
+        {error && !items.length ? (
+          <ErrorState title="Feedback could not be loaded" onRetry={fetchFeedback}>
+            The request to the feedback service failed. Your data is untouched.
+          </ErrorState>
+        ) : loading ? (
+          <SkeletonTable rows={8} columns={6} />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon="inbox"
+            title={filtered ? 'No records match these filters' : 'No feedback yet'}
+            actions={
+              filtered ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setCategory('');
+                    setSentiment('');
+                    setSource('');
+                    setPage(1);
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : (
+                <Button variant="primary" icon="download" onClick={() => navigate('/import')}>
+                  Import feedback
+                </Button>
+              )
+            }
           >
-            {cleaning ? 'Cleaning...' : 'Clean Data'}
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleCategorize}
-            disabled={categorizing || !selectedWorkspace}
-          >
-            {categorizing ? 'Categorizing...' : 'Categorize'}
-          </button>
-        </div>
-      </div>
-
-      {actionMessage && (
-        <div className="alert alert-success">{actionMessage}</div>
-      )}
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {/* Filters */}
-      <div className="card">
-        <div className="card-body">
-          <div className="filters-row">
-            <div className="form-group">
-              <label>Workspace</label>
-              <select
-                value={selectedWorkspace}
-                onChange={(e) => { setSelectedWorkspace(e.target.value); setPage(1); }}
-                className="select-input"
-              >
-                {workspaces.length === 0 && <option value="">No workspaces</option>}
-                {workspaces.map((ws) => (
-                  <option key={ws._id} value={ws._id}>{ws.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Category</label>
-              <select value={category} onChange={handleCategoryChange} className="select-input">
-                {CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Sentiment</label>
-              <select value={sentiment} onChange={handleSentimentChange} className="select-input">
-                {SENTIMENTS.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Source</label>
-              <select value={source} onChange={handleSourceChange} className="select-input">
-                {SOURCES.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Feedback Table */}
-      <div className="card">
-        <div className="card-body" style={{ padding: 0 }}>
-          {loading ? (
-            <div className="loading-state">Loading feedback...</div>
-          ) : feedback.length === 0 ? (
-            <div className="empty-state">
-              <p>No feedback found. Try adjusting your filters or import some data.</p>
-            </div>
-          ) : (
-            <div className="table-responsive">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Source</th>
-                    <th>Category</th>
-                    <th>Sentiment</th>
-                    <th>Rating</th>
-                    <th>Date</th>
+            {filtered
+              ? 'Widen the filters, or clear them to see every record in this workspace.'
+              : 'Import a CSV or JSON export and the records will appear here, ready to clean and categorise.'}
+          </EmptyState>
+        ) : (
+          <div className="table-responsive">
+            <table className="table">
+              <caption className="sr-only">
+                {`Feedback items, page ${page} of ${totalPages}`}
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Item</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Category</th>
+                  <th scope="col">Sentiment</th>
+                  <th scope="col">Rating</th>
+                  <th scope="col">Imported</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item._id}>
+                    <td>
+                      <div className="table-primary">
+                        <strong>{item.title || 'Untitled record'}</strong>
+                        {item.content && <span className="table-secondary">{item.content}</span>}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="badge badge-neutral">
+                        {(item.source || 'unknown').replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td>
+                      {item.category ? (
+                        <span className="badge badge-accent">
+                          {item.category.replace(/_/g, ' ')}
+                        </span>
+                      ) : (
+                        <span className="text-light">Not categorised</span>
+                      )}
+                    </td>
+                    <td>
+                      {item.sentiment ? (
+                        <Badge tone={SENTIMENT_TONE[item.sentiment] || 'neutral'}>
+                          {item.sentiment}
+                        </Badge>
+                      ) : (
+                        <span className="text-light">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {item.rating ? (
+                        <span style={{ color: sentimentTones.neutral.line, letterSpacing: 1 }}>
+                          {stars(item.rating)}
+                        </span>
+                      ) : (
+                        <span className="text-light">—</span>
+                      )}
+                    </td>
+                    <td className="text-muted tight">
+                      {item.created_at ? new Date(item.created_at).toLocaleDateString() : '—'}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {feedback.map((item) => (
-                    <tr key={item._id}>
-                      <td>
-                        <div className="feedback-title-cell">
-                          <strong>{item.title || 'Untitled'}</strong>
-                          <span className="feedback-preview">{item.content?.substring(0, 80)}...</span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="source-badge">{item.source?.replace(/_/g, ' ')}</span>
-                      </td>
-                      <td>
-                        {item.category ? (
-                          <span className="category-badge">{item.category.replace(/_/g, ' ')}</span>
-                        ) : (
-                          <span className="text-muted">Uncategorized</span>
-                        )}
-                      </td>
-                      <td>
-                        {item.sentiment ? (
-                          <span className={`sentiment-badge ${item.sentiment}`}>
-                            {item.sentiment}
-                          </span>
-                        ) : (
-                          <span className="text-muted">-</span>
-                        )}
-                      </td>
-                      <td>
-                        {item.rating ? (
-                          <span className="rating">{'★'.repeat(item.rating)}{'☆'.repeat(5 - item.rating)}</span>
-                        ) : (
-                          <span className="text-muted">-</span>
-                        )}
-                      </td>
-                      <td className="text-muted">
-                        {item.created_at ? new Date(item.created_at).toLocaleDateString() : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
+      {!loading && totalPages > 1 && (
         <div className="pagination">
-          <button
-            className="btn btn-sm btn-secondary"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          <Button
+            size="sm"
+            icon="arrowLeft"
             disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
             Previous
-          </button>
+          </Button>
           <span className="pagination-info">
-            Page {page} of {totalPages}
+            Page {page} of {totalPages} · {total} records
           </span>
-          <button
-            className="btn btn-sm btn-secondary"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          <Button
+            size="sm"
+            iconRight="arrowRight"
             disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           >
             Next
-          </button>
+          </Button>
         </div>
       )}
     </div>
   );
 }
-
-export default FeedbackList;

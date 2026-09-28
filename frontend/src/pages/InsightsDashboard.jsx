@@ -1,87 +1,104 @@
-/**
- * InsightsDashboard page - Milestone 2.
- * Displays Theme Extraction, Customer Pain Points (with severity scoring & explainability),
- * Feature Request Clusters (with demand/priority scoring & unique customer counts),
- * and Trend Analysis with interactive Area Chart.
- */
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import Icon from '../components/Icon';
 import {
-  SentimentDonutChart,
   CategoryPieChart,
-  TrendAreaChart,
-  SeverityBarChart,
   FeaturePriorityChart,
+  SentimentDonutChart,
+  SeverityBarChart,
+  TrendAreaChart,
 } from '../components/Charts';
+import { useBusy } from '../context/BusyContext';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+  SkeletonCardGrid,
+  SkeletonChart,
+  SkeletonStatGrid,
+  Stat,
+  StatGrid,
+  Tabs,
+} from '../components/ui';
 
-function InsightsDashboard() {
+const TABS = [
+  { value: 'pain-points', label: 'Pain points' },
+  { value: 'clusters', label: 'Feature clusters' },
+  { value: 'themes', label: 'Themes' },
+  { value: 'trends', label: 'Trends' },
+];
+
+const SEVERITY_TONE = { high: 'danger', medium: 'warning', low: 'success' };
+const DEMAND_TONE = { high: 'accent', medium: 'warning', low: 'neutral' };
+
+const SENTIMENT_KEYS = [
+  { key: 'positive', tone: 'var(--success)' },
+  { key: 'neutral', tone: 'var(--warning)' },
+  { key: 'negative', tone: 'var(--danger)' },
+];
+
+function SentimentBar({ breakdown = {}, total = 1 }) {
+  const sum = total || 1;
+  return (
+    <div className="bar-stack" aria-hidden="true">
+      {SENTIMENT_KEYS.map(({ key, tone }) => (
+        <span key={key} style={{ width: `${((breakdown[key] || 0) / sum) * 100}%`, background: tone }} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Insights — what the feedback means.
+ *
+ * Order of argument: headline numbers, then the written summary, then the four
+ * detail views. One primary action (re-run the analysis) and one settings
+ * control; every other action lives inside the item it belongs to.
+ */
+export default function InsightsDashboard() {
+  const navigate = useNavigate();
+  const { begin } = useBusy();
+
   const [workspaces, setWorkspaces] = useState([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState('');
   const [insights, setInsights] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState('');
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('pain-points'); // 'pain-points' | 'clusters' | 'themes' | 'trends'
+  const [activeTab, setActiveTab] = useState('pain-points');
   const [severityFilter, setSeverityFilter] = useState('all');
 
-  // Groq AI states
   const [aiStatus, setAiStatus] = useState(null);
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKey, setApiKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [keyMessage, setKeyMessage] = useState('');
-
-  const fetchAiStatus = async () => {
-    try {
-      const res = await api.get('/insights/ai/status');
-      setAiStatus(res.data);
-    } catch (err) {
-      // Ignored
-    }
-  };
-
-  // Fetch workspaces and AI status on mount
-  useEffect(() => {
-    fetchWorkspaces();
-    fetchAiStatus();
-  }, []);
-
-  const fetchWorkspaces = async () => {
-    try {
-      const response = await api.get('/workspaces');
-      setWorkspaces(response.data);
-      if (response.data.length > 0) {
-        setSelectedWorkspace(response.data[0]._id);
-      }
-    } catch (err) {
-      setError('Failed to load workspaces.');
-    }
-  };
+  const [notice, setNotice] = useState('');
 
   const fetchInsights = useCallback(async (workspaceId) => {
     if (!workspaceId) return;
     setLoading(true);
     setError('');
     try {
-      const response = await api.get(`/insights/${workspaceId}`);
-      setInsights(response.data);
+      const { data } = await api.get(`/insights/${workspaceId}`);
+      setInsights(data);
     } catch (err) {
-      // If no cached insights exist (404 or 0 analyzed), auto-trigger analysis
-      const status = err.response?.status;
-      if (status === 404 || (err.response?.data?.detail || '').toLowerCase().includes('no feedback')) {
-        // Auto-run analysis silently
-        try {
-          setLoading(false);
-          setAnalyzing(true);
-          const res = await api.post(`/insights/${workspaceId}/analyze`);
-          setInsights(res.data);
-        } catch (analyzeErr) {
-          setError(analyzeErr.response?.data?.detail || 'Failed to generate insights. Please click "Re-Run AI Analysis".');
-        } finally {
-          setAnalyzing(false);
-        }
+      const detail = (err.response?.data?.detail || '').toLowerCase();
+      if (err.response?.status === 404 || detail.includes('no feedback')) {
+        setInsights(null);
       } else {
-        setError(err.response?.data?.detail || 'Failed to fetch insights. Click "Re-Run AI Analysis" to generate fresh insights.');
+        setError(err.response?.data?.detail || 'Could not load insights for this workspace.');
       }
     } finally {
       setLoading(false);
@@ -89,657 +106,644 @@ function InsightsDashboard() {
   }, []);
 
   useEffect(() => {
-    if (selectedWorkspace) {
-      fetchInsights(selectedWorkspace);
-    }
+    (async () => {
+      try {
+        const { data } = await api.get('/workspaces');
+        setWorkspaces(data);
+        if (data.length > 0) setSelectedWorkspace(data[0]._id);
+        else setLoading(false);
+      } catch {
+        setError('Could not load your workspaces.');
+        setLoading(false);
+      }
+      try {
+        const { data } = await api.get('/insights/ai/status');
+        setAiStatus(data);
+      } catch {
+        /* status is optional */
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (selectedWorkspace) fetchInsights(selectedWorkspace);
   }, [selectedWorkspace, fetchInsights]);
 
-  const handleRunAnalysis = async () => {
+  const runAnalysis = async (path, label) => {
     if (!selectedWorkspace) return;
-    setAnalyzing(true);
+    const done = begin(label);
+    setRunning(path);
     setError('');
+    setNotice('');
     try {
-      const response = await api.post(`/insights/${selectedWorkspace}/analyze`);
-      setInsights(response.data);
+      const { data } = await api.post(path);
+      if (data?.agents_executed) {
+        setNotice(`Analysis finished across ${data.agents_executed.length} agents: ${data.agents_executed.join(', ')}.`);
+      }
+      await fetchInsights(selectedWorkspace);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Analysis failed. Please try again.');
+      setError(err.response?.data?.detail || `${label} failed. Try again in a moment.`);
     } finally {
-      setAnalyzing(false);
+      setRunning('');
+      done();
     }
   };
 
-  // Filter pain points
-  const filteredPainPoints = insights?.pain_points?.filter((pp) => {
-    if (severityFilter === 'all') return true;
-    return pp.severity === severityFilter;
-  }) || [];
+  const painPoints = insights?.pain_points || [];
+  const clusters = insights?.feature_clusters || [];
+  const themes = insights?.themes || [];
+  const trends = insights?.trends || [];
+  const filteredPainPoints =
+    severityFilter === 'all' ? painPoints : painPoints.filter((pp) => pp.severity === severityFilter);
+
+  const tabList = TABS.map((tab) => ({
+    ...tab,
+    count: { 'pain-points': painPoints.length, clusters: clusters.length, themes: themes.length, trends: trends.length }[tab.value],
+  }));
+
+  const hasData = insights && insights.total_analyzed > 0;
 
   return (
     <div className="page-container">
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Product Intelligence & Insights</h1>
-          <p className="page-subtitle">
-            Automated Theme Extraction, Pain Point Severity, Feature Clustering & Trends
-          </p>
-        </div>
-        <div className="page-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            className="btn btn-primary"
-            onClick={handleRunAnalysis}
-            disabled={analyzing || loading || !selectedWorkspace}
-          >
-            {analyzing ? 'Extracting Insights with AI...' : 'Re-Run AI Analysis'}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        icon="barChart"
+        title="Insights"
+        description="Themes, pain points, feature demand and sentiment trends extracted from this workspace's feedback."
+        actions={
+          <>
+            <IconButton
+              icon="sliders"
+              label="AI engine settings"
+              onClick={() => {
+                setKeyMessage('');
+                setShowSettings(true);
+              }}
+            />
+            <Button
+              variant="outline"
+              icon="users"
+              disabled={!selectedWorkspace}
+              loading={running.endsWith('crew-ai-analyze')}
+              onClick={() => runAnalysis(`/insights/${selectedWorkspace}/crew-ai-analyze`, 'Running the agent crew')}
+            >
+              Run agent crew
+            </Button>
+            <Button
+              variant="primary"
+              icon="zap"
+              disabled={!selectedWorkspace}
+              loading={running.endsWith('/analyze')}
+              onClick={() => runAnalysis(`/insights/${selectedWorkspace}/analyze`, 'Extracting insights')}
+            >
+              {hasData ? 'Re-run analysis' : 'Run analysis'}
+            </Button>
+          </>
+        }
+      />
 
-      {/* Workspace Selector Bar */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div className="card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px' }}>
-            <label style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
-              Select Workspace:
-            </label>
-            <select
+      {notice && <Alert variant="success">{notice}</Alert>}
+      {error && <Alert variant="error">{error}</Alert>}
+
+      <Card>
+        <CardBody>
+          <div className="row row-wrap row-between">
+            <Select
+              label="Workspace"
               value={selectedWorkspace}
               onChange={(e) => setSelectedWorkspace(e.target.value)}
-              className="select-input"
-              style={{ maxWidth: '340px' }}
+              disabled={workspaces.length === 0}
             >
+              {workspaces.length === 0 && <option value="">No workspaces</option>}
               {workspaces.map((ws) => (
                 <option key={ws._id} value={ws._id}>
                   {ws.name}
                 </option>
               ))}
-            </select>
-          </div>
-          {insights?.analyzed_at && (
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Last analyzed: {new Date(insights.analyzed_at).toLocaleTimeString()} ({new Date(insights.analyzed_at).toLocaleDateString()})
+            </Select>
+
+            <span className="text-sm text-muted">
+              {insights?.analyzed_at
+                ? `Last analysed ${new Date(insights.analyzed_at).toLocaleString()}`
+                : 'Not analysed yet'}
             </span>
-          )}
-        </div>
-      </div>
+          </div>
+        </CardBody>
+      </Card>
 
-
-      {loading || analyzing ? (
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>{analyzing ? 'Running AI analysis on your feedback...' : 'Loading insights...'}</p>
-        </div>
-      ) : error ? (
-        <div className="card" style={{ padding: '2.5rem', textAlign: 'center' }}>
-          <h3 style={{ marginBottom: '0.5rem', color: 'var(--text)' }}>Could not load insights</h3>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', maxWidth: '480px', margin: '0 auto 1.5rem' }}>{error}</p>
-          <button
-            className="btn btn-primary"
-            onClick={handleRunAnalysis}
-            disabled={analyzing || !selectedWorkspace}
+      {loading ? (
+        <>
+          <SkeletonStatGrid count={4} />
+          <SkeletonChart label="Loading insights" />
+          <SkeletonCardGrid count={2} />
+        </>
+      ) : error && !insights ? (
+        <Card>
+          <ErrorState
+            title="Insights could not be loaded"
+            onRetry={() => fetchInsights(selectedWorkspace)}
           >
-            Run Analysis Now
-          </button>
-        </div>
-      ) : !insights || insights.total_analyzed === 0 ? (
-        <div className="empty-state card" style={{ padding: '3rem', textAlign: 'center' }}>
-          <h3>No Feedback Records in this Workspace</h3>
-          <p>Import feedback via the <strong>Import Data</strong> tab, then click <strong>Re-Run AI Analysis</strong> to generate themes, pain points, and clusters.</p>
-        </div>
+            The insights service did not respond. Nothing was changed.
+          </ErrorState>
+        </Card>
+      ) : !hasData ? (
+        <Card>
+          <EmptyState
+            icon="inbox"
+            title="Nothing analysed in this workspace yet"
+            actions={
+              <>
+                <Button variant="outline" icon="download" onClick={() => navigate('/import')}>
+                  Import feedback
+                </Button>
+                <Button
+                  variant="primary"
+                  icon="zap"
+                  loading={running.endsWith('/analyze')}
+                  onClick={() => runAnalysis(`/insights/${selectedWorkspace}/analyze`, 'Extracting insights')}
+                >
+                  Run analysis
+                </Button>
+              </>
+            }
+          >
+            Import feedback first, then run the analysis to get themes, pain points and clusters.
+          </EmptyState>
+        </Card>
       ) : (
         <>
-          {/* Executive Metrics Overview */}
-          <div className="kpi-grid" style={{ marginBottom: '1.5rem' }}>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">Product Sentiment Health</span>
-              </div>
-              <div className="kpi-value">{insights.health_score ?? 75}%</div>
-              <div className="kpi-footer">Calculated from sentiment & ratings</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">Feedback Analyzed</span>
-              </div>
-              <div className="kpi-value">{insights.total_analyzed}</div>
-              <div className="kpi-footer">Total canonical records</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">Identified Pain Points</span>
-              </div>
-              <div className="kpi-value">{insights.pain_points?.length || 0}</div>
-              <div className="kpi-footer">Ranked by severity & impact</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-header">
-                <span className="kpi-label">Feature Clusters</span>
-              </div>
-              <div className="kpi-value">{insights.feature_clusters?.length || 0}</div>
-              <div className="kpi-footer">Synthesized opportunity groups</div>
-            </div>
-          </div>
+          <StatGrid>
+            <Stat
+              label="Sentiment health"
+              value={`${insights.health_score ?? 0}%`}
+              hint="Positive share, weighted by rating"
+              featured
+            />
+            <Stat label="Feedback analysed" value={insights.total_analyzed} hint="Canonical records" />
+            <Stat label="Pain points" value={painPoints.length} hint="Ranked by impact score" />
+            <Stat label="Feature clusters" value={clusters.length} hint="Grouped opportunity areas" />
+          </StatGrid>
 
-          {/* AI Executive Briefing Card (Milestone 2 AI Enhancement) */}
           {insights.ai_summary && (
-            <div className="card" style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--primary)', backgroundColor: 'var(--bg-card)' }}>
-              <div className="card-body" style={{ padding: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>
-                      Executive Summary: {insights.ai_summary.headline}
-                    </h3>
-                  </div>
-                  <span style={{ fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '12px', backgroundColor: 'var(--primary-light)', color: 'var(--primary)' }}>
-                    AI-Powered Analysis
-                  </span>
-                </div>
-                <p style={{ fontSize: '14px', color: 'var(--text)', lineHeight: 1.5, marginBottom: '14px' }}>
-                  {insights.ai_summary.overview}
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+            <Card>
+              <CardHeader title={`Executive summary — ${insights.ai_summary.headline}`} />
+              <CardBody className="stack stack-md">
+                <p className="prose">{insights.ai_summary.overview}</p>
+
+                <div className="grid grid-2">
                   {insights.ai_summary.top_frictions?.length > 0 && (
-                    <div style={{ padding: '12px 14px', backgroundColor: 'rgba(168, 83, 76, 0.08)', borderRadius: '8px', border: '1px solid rgba(168, 83, 76, 0.2)' }}>
-                      <strong style={{ color: '#A8534C', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        Critical Customer Frictions
-                      </strong>
-                      <ul style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '12.5px', color: 'var(--text)' }}>
-                        {insights.ai_summary.top_frictions.map((f, i) => (
-                          <li key={i} style={{ marginBottom: '4px' }}>{f}</li>
+                    <div className="callout callout-warning stack stack-sm">
+                      <strong>Where customers get stuck</strong>
+                      <ul className="styled-list">
+                        {insights.ai_summary.top_frictions.map((item) => (
+                          <li key={item}>{item}</li>
                         ))}
                       </ul>
                     </div>
                   )}
                   {insights.ai_summary.quick_wins?.length > 0 && (
-                    <div style={{ padding: '12px 14px', backgroundColor: 'rgba(53, 92, 82, 0.08)', borderRadius: '8px', border: '1px solid rgba(53, 92, 82, 0.2)' }}>
-                      <strong style={{ color: '#2E7D32', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        High-Impact Quick Wins
-                      </strong>
-                      <ul style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '12.5px', color: 'var(--text)' }}>
-                        {insights.ai_summary.quick_wins.map((q, i) => (
-                          <li key={i} style={{ marginBottom: '4px' }}>{q}</li>
+                    <div className="callout stack stack-sm" style={{ background: 'var(--success-light)', borderColor: 'var(--success-line)' }}>
+                      <strong>Cheapest wins</strong>
+                      <ul className="styled-list">
+                        {insights.ai_summary.quick_wins.map((item) => (
+                          <li key={item}>{item}</li>
                         ))}
                       </ul>
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
+              </CardBody>
+            </Card>
           )}
 
-          {/* Navigation Tabs */}
-          <div className="insights-tabs">
-            <button
-              className={`tab-btn ${activeTab === 'pain-points' ? 'active' : ''}`}
-              onClick={() => setActiveTab('pain-points')}
-            >
-              Customer Pain Points ({insights.pain_points?.length || 0})
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'clusters' ? 'active' : ''}`}
-              onClick={() => setActiveTab('clusters')}
-            >
-              Feature Request Clusters ({insights.feature_clusters?.length || 0})
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'themes' ? 'active' : ''}`}
-              onClick={() => setActiveTab('themes')}
-            >
-              Theme Extraction ({insights.themes?.length || 0})
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'trends' ? 'active' : ''}`}
-              onClick={() => setActiveTab('trends')}
-            >
-              Trend & Trajectory ({insights.trends?.length || 0})
-            </button>
-          </div>
+          <Tabs tabs={tabList} value={activeTab} onChange={setActiveTab} label="Insight views" />
 
-          {/* TAB 1: PAIN POINTS */}
           {activeTab === 'pain-points' && (
-            <div>
-              <div className="card" style={{ marginBottom: '1.25rem' }}>
-                <div className="card-body" style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>Severity & Impact Overview</h3>
-                      <p style={{ color: 'var(--text-muted)', margin: '4px 0 0', fontSize: '13px' }}>
-                        High-friction friction areas sorted by deterministic impact score.
-                      </p>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Filter Severity:</span>
-                      <select
-                        value={severityFilter}
-                        onChange={(e) => setSeverityFilter(e.target.value)}
-                        className="select-input"
-                        style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}
-                      >
-                        <option value="all">All Severities</option>
-                        <option value="high">High Severity</option>
-                        <option value="medium">Medium Severity</option>
-                        <option value="low">Low Severity</option>
-                      </select>
-                    </div>
-                  </div>
-                  <SeverityBarChart painPoints={insights.pain_points || []} />
-                </div>
-              </div>
+            <div className="stack">
+              <Card>
+                <CardHeader
+                  title="Severity and impact"
+                  hint="Every pain point, scored from volume, sentiment, ratings and bug count."
+                  actions={
+                    <Select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)}>
+                      <option value="all">All severities</option>
+                      <option value="high">High only</option>
+                      <option value="medium">Medium only</option>
+                      <option value="low">Low only</option>
+                    </Select>
+                  }
+                />
+                <CardBody>
+                  {painPoints.length === 0 ? (
+                    <EmptyState icon="target" title="No pain points found">
+                      The analysis did not identify any recurring customer pain in this set.
+                    </EmptyState>
+                  ) : (
+                    <SeverityBarChart painPoints={painPoints} />
+                  )}
+                </CardBody>
+              </Card>
 
               {filteredPainPoints.length === 0 ? (
-                <div className="card card-body" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No pain points match the selected filter.
-                </div>
+                <Card>
+                  <EmptyState
+                    icon="filter"
+                    title={`No ${severityFilter} severity pain points`}
+                    actions={
+                      <Button variant="secondary" onClick={() => setSeverityFilter('all')}>
+                        Show all severities
+                      </Button>
+                    }
+                  >
+                    Try a different severity filter.
+                  </EmptyState>
+                </Card>
               ) : (
                 <div className="insights-grid">
                   {filteredPainPoints.map((pp) => (
-                    <div key={pp.id} className={`insight-card severity-${pp.severity}`}>
-                      <div className="insight-card-header">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span className={`badge-severity badge-${pp.severity}`}>
-                            {pp.severity.toUpperCase()}
+                    <Card key={pp.id} className={`severity-${pp.severity}`}>
+                      <CardBody className="stack stack-md">
+                        <div className="insight-card-header">
+                          <div className="stack stack-sm">
+                            <Badge tone={SEVERITY_TONE[pp.severity] || 'neutral'}>{pp.severity}</Badge>
+                            <h3 className="insight-card-title">{pp.title}</h3>
+                          </div>
+                          <span className="impact-pill">
+                            <strong>{pp.impact_score}</strong>/100
                           </span>
-                          <h3 className="insight-card-title">{pp.title}</h3>
                         </div>
-                        <span className="impact-pill">
-                          Impact: <strong>{pp.impact_score}/100</strong>
-                        </span>
-                      </div>
 
-                      <p className="insight-card-desc">{pp.description}</p>
+                        <p className="insight-card-desc">{pp.description}</p>
 
-                      {/* Explainability Breakdown */}
-                      {pp.score_breakdown && (
-                        <div style={{
-                          backgroundColor: 'rgba(0,0,0,0.03)',
-                          border: '1px dashed var(--border)',
-                          borderRadius: '6px',
-                          padding: '8px 12px',
-                          marginBottom: '12px',
-                          fontSize: '11px',
-                          color: 'var(--text-muted)'
-                        }}>
-                          <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: '2px' }}>
-                            Impact Score Formula Components:
-                          </div>
-                          <div>
-                            Volume: <strong>{pp.score_breakdown.frequency} items</strong> • Negative Sentiment: <strong>{pp.score_breakdown.negative_sentiment_pct}%</strong> • Avg Rating: <strong>{pp.score_breakdown.avg_rating}</strong> • Bugs: <strong>{pp.score_breakdown.bug_count}</strong>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* AI Root Cause Diagnosis */}
-                      {pp.root_cause && (
-                        <div style={{
-                          backgroundColor: 'rgba(53, 92, 82, 0.07)',
-                          border: '1px solid rgba(53, 92, 82, 0.22)',
-                          borderRadius: '6px',
-                          padding: '8px 12px',
-                          marginBottom: '12px',
-                          fontSize: '12px',
-                          color: 'var(--text)'
-                        }}>
-                          <strong style={{ color: 'var(--primary)' }}>Root Cause Diagnosis: </strong>
-                          {pp.root_cause}
-                        </div>
-                      )}
-
-                      <div className="recommendation-box">
-                        <div>
-                          <strong>Recommended Action:</strong> {pp.recommended_action}
-                        </div>
-                      </div>
-
-                      {pp.sample_quotes?.length > 0 && (
-                        <div className="quotes-section">
-                          <span className="quotes-title">Representative User Quotes (Deduplicated):</span>
-                          {pp.sample_quotes.map((q, idx) => (
-                            <div key={idx} className="quote-bubble">
-                              "{q}"
+                        {pp.score_breakdown && (
+                          <div className="callout text-xs text-muted stack stack-sm">
+                            <strong className="text-sm">How this score was reached</strong>
+                            <div>
+                              {pp.score_breakdown.frequency} items · {pp.score_breakdown.negative_sentiment_pct}%
+                              negative · avg rating {pp.score_breakdown.avg_rating} ·{' '}
+                              {pp.score_breakdown.bug_count} bugs
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          </div>
+                        )}
 
-                      <div className="insight-card-footer">
-                        <span>Category: <strong>{pp.category?.replace(/_/g, ' ')}</strong></span>
-                        <span>Affected Records: <strong>{pp.affected_users_count} items</strong></span>
-                      </div>
-                    </div>
+                        {pp.root_cause && (
+                          <div className="ai-note-box">
+                            <strong>Likely root cause: </strong>
+                            {pp.root_cause}
+                          </div>
+                        )}
+
+                        {pp.recommended_action && (
+                          <div className="recommendation-box">
+                            <strong>Recommended action: </strong>
+                            {pp.recommended_action}
+                          </div>
+                        )}
+
+                        {pp.sample_quotes?.length > 0 && (
+                          <div className="quotes-section">
+                            <span className="quotes-title">In their words</span>
+                            {pp.sample_quotes.map((quote) => (
+                              <blockquote key={quote} className="quote-bubble">
+                                “{quote}”
+                              </blockquote>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="insight-card-footer">
+                          <span>
+                            {pp.category?.replace(/_/g, ' ')} · {pp.affected_users_count} items
+                          </span>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon="file"
+                          fullWidth
+                          onClick={() => navigate('/prds')}
+                        >
+                          Draft a PRD from this
+                        </Button>
+                      </CardBody>
+                    </Card>
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB 2: FEATURE CLUSTERS */}
           {activeTab === 'clusters' && (
-            <div>
-              <div className="card" style={{ marginBottom: '1.25rem' }}>
-                <div className="card-body" style={{ padding: '16px 20px' }}>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>Feature Opportunity Priorities</h3>
-                  <p style={{ color: 'var(--text-muted)', margin: '4px 0 12px', fontSize: '13px' }}>
-                    Ranked by request volume, customer breadth, and user satisfaction potential.
-                  </p>
-                  <FeaturePriorityChart clusters={insights.feature_clusters || []} />
-                </div>
-              </div>
+            <div className="stack">
+              <Card>
+                <CardHeader
+                  title="Feature opportunity priorities"
+                  hint="Ranked by request volume, how many customers asked, and satisfaction upside."
+                />
+                <CardBody>
+                  {clusters.length === 0 ? (
+                    <EmptyState icon="layers" title="No feature clusters yet">
+                      Import feature requests and re-run the analysis to group them.
+                    </EmptyState>
+                  ) : (
+                    <FeaturePriorityChart clusters={clusters} />
+                  )}
+                </CardBody>
+              </Card>
 
-              {insights.feature_clusters?.length === 0 ? (
-                <div className="card card-body" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No feature clusters found. Import feature requests to generate clusters.
+              {clusters.length > 0 && (
+                <div className="insights-grid">
+                  {clusters.map((cluster) => (
+                    <Card key={cluster.id}>
+                      <CardBody className="stack stack-md">
+                        <div className="cluster-card-header">
+                          <div className="stack stack-sm">
+                            <Badge tone={DEMAND_TONE[cluster.demand_level] || 'neutral'}>
+                              {cluster.demand_level} demand
+                            </Badge>
+                            <h3 className="cluster-title">{cluster.cluster_name}</h3>
+                          </div>
+                          <div className="priority-meter">
+                            <span className="priority-score">{cluster.priority_score}</span>
+                            <span className="priority-label">Score</span>
+                          </div>
+                        </div>
+
+                        <p className="cluster-summary">{cluster.summary}</p>
+
+                        {cluster.score_breakdown?.formula_weights && (
+                          <div className="callout text-xs text-muted">
+                            <strong className="text-sm">Scoring weights: </strong>
+                            {cluster.score_breakdown.formula_weights}
+                          </div>
+                        )}
+
+                        {cluster.keywords?.length > 0 && (
+                          <div className="keyword-tags">
+                            {cluster.keywords.map((keyword) => (
+                              <span key={keyword} className="keyword-pill">
+                                {keyword}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {cluster.sample_requests?.length > 0 && (
+                          <div className="quotes-section">
+                            <span className="quotes-title">
+                              {cluster.request_count} requests from{' '}
+                              {cluster.unique_customers_count || cluster.request_count} customers
+                            </span>
+                            {cluster.sample_requests.map((request) => (
+                              <blockquote key={request} className="quote-bubble">
+                                “{request}”
+                              </blockquote>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="cluster-footer">
+                          <span>{cluster.request_count} requests</span>
+                          <div className="progress" style={{ width: 80 }}>
+                            <span className="progress-fill" style={{ width: `${cluster.priority_score}%` }} />
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon="file"
+                          fullWidth
+                          onClick={() => navigate('/prds')}
+                        >
+                          Draft a PRD from this
+                        </Button>
+                      </CardBody>
+                    </Card>
+                  ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'themes' && (
+            <div className="stack">
+              {themes.length === 0 ? (
+                <Card>
+                  <EmptyState icon="layers" title="No themes extracted">
+                    Re-run the analysis to mine recurring topics from this feedback.
+                  </EmptyState>
+                </Card>
               ) : (
                 <div className="insights-grid">
-                  {insights.feature_clusters.map((cluster) => (
-                    <div key={cluster.id} className="cluster-card">
-                      <div className="cluster-card-header">
-                        <div>
-                          <span className={`badge-demand badge-demand-${cluster.demand_level}`}>
-                            {cluster.demand_level.toUpperCase()} DEMAND
-                          </span>
-                          <h3 className="cluster-title">{cluster.cluster_name}</h3>
+                  {themes.map((theme) => (
+                    <Card key={theme.id}>
+                      <CardBody className="stack stack-md">
+                        <div className="theme-card-header">
+                          <h3 className="theme-title">{theme.title}</h3>
+                          <span className="theme-freq-pill">{theme.frequency} mentions</span>
                         </div>
-                        <div className="priority-meter">
-                          <span className="priority-score">{cluster.priority_score}</span>
-                          <span className="priority-label">Priority</span>
-                        </div>
-                      </div>
 
-                      <p className="cluster-summary">{cluster.summary}</p>
+                        <p className="theme-desc">{theme.description}</p>
 
-                      {/* Score breakdown info */}
-                      {cluster.score_breakdown && (
-                        <div style={{
-                          backgroundColor: 'rgba(0,0,0,0.03)',
-                          border: '1px dashed var(--border)',
-                          borderRadius: '6px',
-                          padding: '8px 12px',
-                          marginBottom: '12px',
-                          fontSize: '11px',
-                          color: 'var(--text-muted)'
-                        }}>
-                          <span style={{ fontWeight: 600, color: 'var(--text)' }}>Formula Weights: </span>
-                          {cluster.score_breakdown.formula_weights}
+                        <div className="sentiment-bar-section">
+                          <div className="sentiment-bar-labels">
+                            {SENTIMENT_KEYS.map(({ key }) => (
+                              <span key={key} className={`text-${key === 'positive' ? 'success' : key === 'neutral' ? 'warning' : 'danger'}`}>
+                                {theme.sentiment_breakdown?.[key] || 0} {key}
+                              </span>
+                            ))}
+                          </div>
+                          <SentimentBar breakdown={theme.sentiment_breakdown} total={theme.frequency} />
                         </div>
-                      )}
 
-                      {/* Keywords pills */}
-                      {cluster.keywords?.length > 0 && (
-                        <div className="keyword-tags">
-                          {cluster.keywords.map((kw, i) => (
-                            <span key={i} className="keyword-pill">
-                              #{kw}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                        {theme.sample_quotes?.length > 0 && (
+                          <div className="quotes-section">
+                            <span className="quotes-title">In their words</span>
+                            {theme.sample_quotes.map((quote) => (
+                              <blockquote key={quote} className="quote-bubble">
+                                “{quote}”
+                              </blockquote>
+                            ))}
+                          </div>
+                        )}
 
-                      {/* Sample user requests */}
-                      {cluster.sample_requests?.length > 0 && (
-                        <div className="quotes-section">
-                          <span className="quotes-title">
-                            Distinct Quotes ({cluster.request_count} total requests from {cluster.unique_customers_count || cluster.request_count} unique users):
-                          </span>
-                          {cluster.sample_requests.map((req, i) => (
-                            <div key={i} className="quote-bubble">
-                              "{req}"
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="cluster-footer">
-                        <span>
-                          Requests: <strong>{cluster.request_count}</strong> (<strong>{cluster.unique_customers_count || cluster.request_count}</strong> unique customers)
-                        </span>
-                        <div className="progress-bar-container">
-                          <div
-                            className="progress-bar-fill"
-                            style={{ width: `${cluster.priority_score}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    </div>
+                        {theme.keywords?.length > 0 && (
+                          <div className="keyword-tags">
+                            {theme.keywords.map((keyword) => (
+                              <span key={keyword} className="keyword-pill">
+                                {keyword}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </CardBody>
+                    </Card>
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB 3: THEMES */}
-          {activeTab === 'themes' && (
-            <div>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-                Recurring topics mined from customer feedback with exact sentiment breakdowns from analyzed records.
-              </p>
-
-              <div className="insights-grid">
-                {insights.themes?.map((theme) => (
-                  <div key={theme.id} className="theme-card">
-                    <div className="theme-card-header">
-                      <h3 className="theme-title">{theme.title}</h3>
-                      <span className="theme-freq-pill">{theme.frequency} mentions</span>
-                    </div>
-
-                    <p className="theme-desc">{theme.description}</p>
-
-                    {/* Sentiment Distribution Bar */}
-                    <div className="sentiment-bar-section">
-                      <div className="sentiment-bar-labels">
-                        <span style={{ color: '#2E7D32', fontWeight: 600 }}>{theme.sentiment_breakdown?.positive || 0} Positive</span>
-                        <span style={{ color: '#E65100', fontWeight: 600 }}>{theme.sentiment_breakdown?.neutral || 0} Neutral</span>
-                        <span style={{ color: '#C62828', fontWeight: 600 }}>{theme.sentiment_breakdown?.negative || 0} Negative</span>
-                      </div>
-                      <div className="multi-bar" style={{ height: '8px', borderRadius: '4px', display: 'flex', overflow: 'hidden', backgroundColor: 'var(--border)' }}>
-                        <div
-                          style={{
-                            width: `${((theme.sentiment_breakdown?.positive || 0) / (theme.frequency || 1)) * 100}%`,
-                            backgroundColor: '#2E7D32',
-                          }}
-                        />
-                        <div
-                          style={{
-                            width: `${((theme.sentiment_breakdown?.neutral || 0) / (theme.frequency || 1)) * 100}%`,
-                            backgroundColor: '#E65100',
-                          }}
-                        />
-                        <div
-                          style={{
-                            width: `${((theme.sentiment_breakdown?.negative || 0) / (theme.frequency || 1)) * 100}%`,
-                            backgroundColor: '#C62828',
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Distinct Representative Quotes */}
-                    {theme.sample_quotes?.length > 0 && (
-                      <div className="quotes-section" style={{ marginTop: '10px' }}>
-                        <span className="quotes-title">Deduplicated Quotes:</span>
-                        {theme.sample_quotes.map((q, idx) => (
-                          <div key={idx} className="quote-bubble">
-                            "{q}"
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Top Keywords */}
-                    {theme.keywords?.length > 0 && (
-                      <div className="keyword-tags" style={{ marginTop: '0.75rem' }}>
-                        {theme.keywords.map((kw, i) => (
-                          <span key={i} className="keyword-pill">
-                            {kw}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: TRENDS */}
           {activeTab === 'trends' && (
-            <div>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-                Chronological volume velocity and sentiment trajectory across time intervals.
-              </p>
+            <div className="stack">
+              {trends.length === 0 ? (
+                <Card>
+                  <EmptyState icon="trendingUp" title="No trend data yet">
+                    Trends appear once feedback spans more than one time period.
+                  </EmptyState>
+                </Card>
+              ) : (
+                <>
+                  <Card>
+                    <CardHeader
+                      title="Volume and sentiment over time"
+                      hint="Hover any point for the period's counts and top category."
+                    />
+                    <CardBody>
+                      <TrendAreaChart trends={trends} />
+                    </CardBody>
+                  </Card>
 
-              {/* Multi-Series Interactive Area Trend Chart */}
-              <div className="card" style={{ marginBottom: '1.5rem' }}>
-                <div className="card-body" style={{ padding: '20px' }}>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>Trend Trajectory & Sentiment Area Graph</h3>
-                  <p style={{ color: 'var(--text-muted)', margin: '4px 0 16px', fontSize: '13px' }}>
-                    Interactive volume and sentiment counts plotted along the timeline. Hover over points for details.
-                  </p>
-                  <TrendAreaChart trends={insights.trends || []} />
-                </div>
-              </div>
-
-              {/* Detailed Trend Table */}
-              <div className="card">
-                <div className="card-body" style={{ padding: 0 }}>
-                  <div className="table-responsive">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Time Period</th>
-                          <th>Total Volume</th>
-                          <th>Positive</th>
-                          <th>Neutral</th>
-                          <th>Negative</th>
-                          <th>Sentiment Score</th>
-                          <th>Top Category</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {insights.trends?.map((t, idx) => (
-                          <tr key={idx}>
-                            <td><strong>{t.period}</strong></td>
-                            <td><span className="badge-count">{t.total_count}</span></td>
-                            <td style={{ color: '#2E7D32', fontWeight: 600 }}>{t.positive_count}</td>
-                            <td style={{ color: '#E65100', fontWeight: 600 }}>{t.neutral_count}</td>
-                            <td style={{ color: '#C62828', fontWeight: 600 }}>{t.negative_count}</td>
-                            <td>
-                              <span
-                                className={`sentiment-badge ${
-                                  t.sentiment_score > 0.1
-                                    ? 'positive'
-                                    : t.sentiment_score < -0.1
-                                    ? 'negative'
-                                    : 'neutral'
-                                }`}
-                              >
-                                {t.sentiment_score > 0 ? `+${t.sentiment_score}` : t.sentiment_score}
-                              </span>
-                            </td>
-                            <td>
-                              <span className="category-badge">
-                                {t.top_category?.replace(/_/g, ' ')}
-                              </span>
-                            </td>
+                  <Card flush>
+                    <CardHeader title="Period detail" />
+                    <div className="table-responsive">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Period</th>
+                            <th scope="col">Volume</th>
+                            <th scope="col">Positive</th>
+                            <th scope="col">Neutral</th>
+                            <th scope="col">Negative</th>
+                            <th scope="col">Score</th>
+                            <th scope="col">Top category</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+                        </thead>
+                        <tbody>
+                          {trends.map((row) => {
+                            const tone =
+                              row.sentiment_score > 0.1 ? 'success' : row.sentiment_score < -0.1 ? 'danger' : 'warning';
+                            return (
+                              <tr key={row.period}>
+                                <td className="text-semibold">{row.period}</td>
+                                <td>{row.total_count}</td>
+                                <td className="text-success">{row.positive_count}</td>
+                                <td className="text-warning">{row.neutral_count}</td>
+                                <td className="text-danger">{row.negative_count}</td>
+                                <td>
+                                  <Badge tone={tone}>
+                                    {row.sentiment_score > 0 ? `+${row.sentiment_score}` : row.sentiment_score}
+                                  </Badge>
+                                </td>
+                                <td>
+                                  <span className="badge badge-neutral">
+                                    {row.top_category?.replace(/_/g, ' ')}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                </>
+              )}
             </div>
           )}
         </>
       )}
 
-      {/* AI Key Configuration Modal */}
-      {showKeyModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '20px'
-        }}>
-          <div className="card" style={{ maxWidth: '480px', width: '100%', padding: '24px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>AI Engine Settings</h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-              AI-powered intelligence engine to analyze customer pain points, extract themes, and cluster product feature requests.
-            </p>
-
-            <div style={{
-              padding: '10px 14px',
-              backgroundColor: aiStatus?.available ? 'rgba(53, 92, 82, 0.08)' : 'rgba(184, 130, 50, 0.08)',
-              borderRadius: '6px',
-              border: `1px solid ${aiStatus?.available ? 'var(--primary)' : 'var(--warning)'}`,
-              marginBottom: '16px',
-              fontSize: '12.5px'
-            }}>
-              <div><strong>Status:</strong> {aiStatus?.status || 'Checking...'}</div>
-
-              {aiStatus?.message && <div style={{ color: 'var(--text-muted)', marginTop: '4px' }}>{aiStatus.message}</div>}
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
-                Groq API Key:
-              </label>
-              <input
-                type="password"
-                placeholder="gsk_..."
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                className="select-input"
-                style={{ width: '100%', padding: '8px 12px' }}
+      {/* Distribution charts live behind the summary so the tab panels stay scannable. */}
+      {hasData && activeTab === 'themes' && (
+        <div className="grid grid-2">
+          <Card>
+            <CardHeader title="Category mix" />
+            <CardBody>
+              <CategoryPieChart
+                categoryDistribution={insights.by_category || {}}
+                totalFeedback={insights.total_analyzed}
               />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                Free key at <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>console.groq.com/keys</a>
-              </span>
-            </div>
-
-            {keyMessage && (
-              <div style={{ fontSize: '12px', marginBottom: '12px', color: keyMessage.includes('Success') ? 'var(--primary)' : '#C62828' }}>
-                {keyMessage}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button className="btn btn-secondary" onClick={() => { setShowKeyModal(false); setKeyMessage(''); }}>
-                Close
-              </button>
-              <button
-                className="btn btn-primary"
-                disabled={savingKey || !apiKeyInput.trim()}
-                onClick={async () => {
-                  setSavingKey(true);
-                  setKeyMessage('');
-                  try {
-                    const res = await api.post('/insights/ai/configure-key', { api_key: apiKeyInput.trim() });
-                    setAiStatus(res.data);
-                    setKeyMessage('Successfully connected to Groq AI');
-                    setApiKeyInput('');
-                  } catch (err) {
-                    setKeyMessage(err.response?.data?.detail || 'Failed to validate API key.');
-                  } finally {
-                    setSavingKey(false);
-                  }
-                }}
-              >
-                {savingKey ? 'Validating...' : 'Save & Verify Key'}
-              </button>
-            </div>
-          </div>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardHeader title="Sentiment split" />
+            <CardBody>
+              <SentimentDonutChart
+                positive={insights.by_sentiment?.positive || 0}
+                neutral={insights.by_sentiment?.neutral || 0}
+                negative={insights.by_sentiment?.negative || 0}
+                healthScore={insights.health_score || 0}
+              />
+            </CardBody>
+          </Card>
         </div>
       )}
+
+      <Modal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        title="AI engine"
+        description="Status of the analysis provider and the key it uses."
+        icon="sliders"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowSettings(false)}>
+              Close
+            </Button>
+            <Button
+              variant="primary"
+              loading={savingKey}
+              disabled={!apiKey.trim()}
+              onClick={async () => {
+                setSavingKey(true);
+                setKeyMessage('');
+                try {
+                  const { data } = await api.post('/insights/ai/configure-key', { api_key: apiKey.trim() });
+                  setAiStatus(data);
+                  setKeyMessage('Key accepted — analysis is ready to run.');
+                  setApiKey('');
+                } catch (err) {
+                  setKeyMessage(err.response?.data?.detail || 'That key was rejected.');
+                } finally {
+                  setSavingKey(false);
+                }
+              }}
+            >
+              Verify and save
+            </Button>
+          </>
+        }
+      >
+        <div className="modal-body">
+          <Alert variant={aiStatus?.available ? 'success' : 'warning'} title={aiStatus?.status || 'Checking status…'}>
+            {aiStatus?.message}
+          </Alert>
+
+          <Input
+            label="Provider API key"
+            type="password"
+            placeholder="gsk_…"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            hint="Stored server-side and used only for analysis."
+          />
+
+          {keyMessage && <Alert variant="info">{keyMessage}</Alert>}
+
+          <a
+            className="text-sm row"
+            style={{ gap: 'var(--sp-1)' }}
+            href="https://console.groq.com/keys"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Get a free key <Icon name="external" size={13} />
+          </a>
+
+        </div>
+      </Modal>
     </div>
   );
 }
-
-export default InsightsDashboard;

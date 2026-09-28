@@ -7,6 +7,24 @@ import re
 from collections import Counter, defaultdict
 from typing import List, Dict, Any, Tuple
 from services.preprocessing import normalize, STOPWORDS_SET
+from services.categorization import detect_sentiment, categorize
+
+
+def _resolve_sentiment(item: Dict[str, Any]) -> str:
+    s = item.get("sentiment")
+    if s:
+        return s
+    text = f"{item.get('title') or ''} {item.get('content') or ''}".strip()
+    return detect_sentiment(text, item.get("rating"))
+
+
+def _resolve_category(item: Dict[str, Any]) -> str:
+    c = item.get("category")
+    if c:
+        return c
+    text = f"{item.get('title') or ''} {item.get('content') or ''}".strip()
+    return categorize(text)
+
 
 
 # Domain topics definition with comprehensive semantic keywords
@@ -126,14 +144,14 @@ def extract_themes_from_feedback(feedback_list: List[Dict[str, Any]]) -> List[Di
             continue
 
         total_topic_items = len(items)
-        pos = sum(1 for it in items if it.get("sentiment") == "positive")
-        neg = sum(1 for it in items if it.get("sentiment") == "negative")
-        neu = sum(1 for it in items if it.get("sentiment") == "neutral")
+        pos = sum(1 for it in items if _resolve_sentiment(it) == "positive")
+        neg = sum(1 for it in items if _resolve_sentiment(it) == "negative")
+        neu = sum(1 for it in items if _resolve_sentiment(it) == "neutral")
 
         sentiment_score = round((pos - neg) / (total_topic_items if total_topic_items > 0 else 1), 2)
 
         # Dominant category
-        category_counts = Counter(it.get("category") or "general_feedback" for it in items)
+        category_counts = Counter(_resolve_category(it) for it in items)
         dominant_cat = category_counts.most_common(1)[0][0] if category_counts else "general_feedback"
 
         # Keywords
@@ -186,8 +204,8 @@ def extract_pain_points_from_feedback(feedback_list: List[Dict[str, Any]]) -> Li
     # Filter items that are pain points
     issue_candidates = []
     for item in feedback_list:
-        sentiment = item.get("sentiment")
-        category = item.get("category")
+        sentiment = _resolve_sentiment(item)
+        category = _resolve_category(item)
         rating = item.get("rating")
 
         is_pain = (
@@ -231,9 +249,9 @@ def extract_pain_points_from_feedback(feedback_list: List[Dict[str, Any]]) -> Li
 
         ratings = [it.get("rating") for it in items if it.get("rating") is not None]
         avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 2.0
-        neg_count = sum(1 for it in items if it.get("sentiment") == "negative")
+        neg_count = sum(1 for it in items if _resolve_sentiment(it) == "negative")
         negative_pct = round((neg_count / count) * 100, 1)
-        bug_count = sum(1 for it in items if it.get("category") == "bug_report")
+        bug_count = sum(1 for it in items if _resolve_category(it) in ("bug_report", "performance_issue"))
 
         # Deterministic Impact Score Formula (0 to 100):
         # 1. Volume Factor (up to 35 pts)
@@ -249,12 +267,13 @@ def extract_pain_points_from_feedback(feedback_list: List[Dict[str, Any]]) -> Li
         impact_score = round(min(98.0, max(20.0, raw_score)), 1)
 
         # Severity
-        if impact_score >= 60.0 or count >= 5 or avg_rating <= 1.5:
+        if impact_score >= 60.0 or count >= 10 or (avg_rating <= 1.5 and neg_count > 5):
             severity = "high"
         elif impact_score >= 40.0 or count >= 3:
             severity = "medium"
         else:
             severity = "low"
+
 
         # Deduplicate sample quotes
         seen_quotes = set()

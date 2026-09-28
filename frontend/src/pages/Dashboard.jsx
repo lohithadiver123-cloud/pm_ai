@@ -1,250 +1,400 @@
-/**
- * Dashboard page.
- * Shows welcome message, workspace info, and feedback statistics.
- * Provides navigation to import and feedback pages.
- */
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { CategoryPieChart, SentimentDonutChart } from '../components/Charts';
+import { sentiment, getCategoryColor, tint } from '../theme';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  PageHeader,
+  ProgressBar,
+  SkeletonChart,
+  SkeletonStatGrid,
+  Stat,
+  StatGrid,
+} from '../components/ui';
 
-function Dashboard() {
+const SENTIMENT_TONE = { positive: 'success', neutral: 'warning', negative: 'danger' };
+
+function stars(rating) {
+  const n = Math.min(5, Math.max(1, Math.round(rating)));
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+/**
+ * Dashboard — the "where do we stand" screen.
+ *
+ * Reads top to bottom as one argument: how much feedback (stats), what it is
+ * about (category mix), how people feel (sentiment), how processed it is, and
+ * the newest raw items. One primary action: go to Insights.
+ */
+export default function Dashboard() {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem('pm_copilot_user') || 'null');
 
   const [workspaces, setWorkspaces] = useState([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState('');
   const [stats, setStats] = useState(null);
+  const [recentFeedback, setRecentFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Workspace creation state
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // Fetch workspaces on mount
-  useEffect(() => {
-    fetchWorkspaces();
-  }, []);
-
-  // Fetch stats when workspace selection changes
-  useEffect(() => {
-    if (selectedWorkspace) {
-      fetchStats(selectedWorkspace);
-    }
-  }, [selectedWorkspace]);
-
-  const fetchWorkspaces = async () => {
+  const fetchWorkspaces = useCallback(async () => {
     try {
-      const response = await api.get('/workspaces');
-      setWorkspaces(response.data);
-      if (response.data.length > 0) {
-        setSelectedWorkspace(response.data[0]._id);
+      const { data } = await api.get('/workspaces');
+      setWorkspaces(data);
+      if (data.length > 0) {
+        setSelectedWorkspace((current) => current || data[0]._id);
       } else {
         setLoading(false);
       }
-    } catch (err) {
-      setError('Failed to load workspaces.');
+    } catch {
+      setError('Could not load your workspaces.');
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchStats = async (workspaceId) => {
-    setLoading(true);
-    setError('');
-    try {
-      const response = await api.get(`/workspaces/${workspaceId}/stats`);
-      setStats(response.data);
-    } catch (err) {
-      setError('Failed to load workspace statistics.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    fetchWorkspaces();
+  }, [fetchWorkspaces]);
+
+  useEffect(() => {
+    if (!selectedWorkspace) return undefined;
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const [statsRes, feedbackRes] = await Promise.all([
+          api.get(`/workspaces/${selectedWorkspace}/stats`),
+          api.get('/feedback', { params: { workspace_id: selectedWorkspace, limit: 6, page: 1 } }),
+        ]);
+        if (cancelled) return;
+        setStats(statsRes.data);
+        setRecentFeedback(feedbackRes.data?.items || []);
+      } catch {
+        if (!cancelled) setError('Could not load this workspace’s data.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWorkspace]);
 
   const handleCreateWorkspace = async () => {
     if (!newWorkspaceName.trim()) return;
     setCreating(true);
     try {
-      await api.post('/workspaces', { name: newWorkspaceName.trim() });
+      const { data } = await api.post('/workspaces', { name: newWorkspaceName.trim() });
       setNewWorkspaceName('');
       setShowCreateForm(false);
       await fetchWorkspaces();
-    } catch (err) {
-      setError('Failed to create workspace.');
+      if (data?._id) setSelectedWorkspace(data._id);
+    } catch {
+      setError('Could not create that workspace.');
     } finally {
       setCreating(false);
     }
   };
 
+  const total = stats?.total_feedback || 0;
+  const cleaned = stats?.cleaned_count || 0;
+  const categorized = stats?.categorized_count || 0;
+  const positive = stats?.by_sentiment?.positive || 0;
+  const positivePercent = total > 0 ? Math.round((positive / total) * 1000) / 10 : 0;
+  const pct = (value) => (total > 0 ? Math.round((value / total) * 100) : 0);
+
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Welcome back, {user?.name || 'Product Manager'} 👋</h1>
-          <p className="page-subtitle">Here's an overview of your feedback workspace.</p>
-        </div>
-        <div className="page-actions">
-          <button className="btn btn-primary" onClick={() => navigate('/import')}>
-            📥 Import Data
-          </button>
-          <button className="btn btn-secondary" onClick={() => navigate('/feedback')}>
-            💬 View Feedback
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        icon="layout"
+        title="Dashboard"
+        description="Feedback volume, what it is about, and how the pipeline is tracking for the selected workspace."
+        actions={
+          <>
+            <div className="workspace-selector-box">
+              <label className="ws-label" htmlFor="workspace-select">
+                Workspace
+              </label>
+              {workspaces.length > 0 ? (
+                <select
+                  id="workspace-select"
+                  className="ws-dropdown"
+                  value={selectedWorkspace}
+                  onChange={(e) => setSelectedWorkspace(e.target.value)}
+                >
+                  {workspaces.map((ws) => (
+                    <option key={ws._id} value={ws._id}>
+                      {ws.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-muted text-sm">None yet</span>
+              )}
+            </div>
 
-      {/* Workspace Selector */}
-      <div className="card">
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 className="card-title">📁 Workspace</h2>
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => setShowCreateForm((v) => !v)}
-          >
-            {showCreateForm ? 'Cancel' : '+ New Workspace'}
-          </button>
-        </div>
-        <div className="card-body">
-          {showCreateForm && (
-            <div className="create-workspace-form">
+            <Button
+              size="sm"
+              variant={showCreateForm ? 'ghost' : 'outline'}
+              icon={showCreateForm ? 'x' : 'plus'}
+              aria-expanded={showCreateForm}
+              onClick={() => setShowCreateForm((v) => !v)}
+            >
+              {showCreateForm ? 'Cancel' : 'New workspace'}
+            </Button>
+
+            <Button variant="outline" icon="download" onClick={() => navigate('/import')}>
+              Import
+            </Button>
+
+            <Button variant="primary" onClick={() => navigate('/insights')}>
+              Review insights
+            </Button>
+          </>
+        }
+      />
+
+      {showCreateForm && (
+        <Card>
+          <CardBody>
+            <div className="row">
+              <label className="field-label sr-only" htmlFor="new-workspace">
+                New workspace name
+              </label>
               <input
-                type="text"
-                placeholder="e.g. Product Q4 2025"
+                id="new-workspace"
+                className="input flex-1"
+                placeholder="Workspace name, e.g. Q4 Store Feedback"
                 value={newWorkspaceName}
                 onChange={(e) => setNewWorkspaceName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateWorkspace()}
                 autoFocus
               />
-              <button
-                className="btn btn-primary btn-sm"
+              <Button
+                variant="primary"
+                loading={creating}
+                disabled={!newWorkspaceName.trim()}
                 onClick={handleCreateWorkspace}
-                disabled={creating || !newWorkspaceName.trim()}
               >
-                {creating ? 'Creating...' : 'Create'}
-              </button>
+                Create
+              </Button>
             </div>
-          )}
-
-          {workspaces.length === 0 && !showCreateForm ? (
-            <div className="empty-state">
-              <p>No workspaces yet. Click <strong>+ New Workspace</strong> to create one.</p>
-            </div>
-          ) : workspaces.length > 0 ? (
-            <select
-              value={selectedWorkspace}
-              onChange={(e) => setSelectedWorkspace(e.target.value)}
-              className="select-input"
-            >
-              {workspaces.map((ws) => (
-                <option key={ws._id} value={ws._id}>
-                  {ws.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-        </div>
-      </div>
-
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {loading && selectedWorkspace && (
-        <div className="loading-state">Loading workspace data...</div>
+          </CardBody>
+        </Card>
       )}
 
-      {/* Stats Cards */}
-      {stats && (
-        <div className="stats-grid">
-          <div className="stat-card stat-card-primary">
-            <div className="stat-icon">📊</div>
-            <div className="stat-value">{stats.total_feedback}</div>
-            <div className="stat-label">Total Feedback</div>
-          </div>
-          <div className="stat-card stat-card-info">
-            <div className="stat-icon">🎫</div>
-            <div className="stat-value">{stats.total_tickets}</div>
-            <div className="stat-label">Support Tickets</div>
-          </div>
-          <div className="stat-card stat-card-success">
-            <div className="stat-icon">✨</div>
-            <div className="stat-value">{stats.cleaned_count}</div>
-            <div className="stat-label">Cleaned</div>
-          </div>
-          <div className="stat-card stat-card-warning">
-            <div className="stat-icon">🏷️</div>
-            <div className="stat-value">{stats.categorized_count}</div>
-            <div className="stat-label">Categorized</div>
-          </div>
-        </div>
-      )}
+      {error && <Alert variant="error">{error}</Alert>}
 
-      {/* Category Breakdown */}
-      {stats && stats.by_category && Object.keys(stats.by_category).length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">📊 Category Breakdown</h2>
+      {loading ? (
+        <>
+          <SkeletonStatGrid count={3} />
+          <SkeletonChart label="Loading category mix" />
+        </>
+      ) : total === 0 ? (
+        <Card>
+          <EmptyState
+            icon="inbox"
+            title="No feedback in this workspace yet"
+            actions={
+              <Button variant="primary" icon="download" onClick={() => navigate('/import')}>
+                Import feedback
+              </Button>
+            }
+          >
+            Import a CSV or JSON export of customer reviews, tickets or survey answers and this page
+            fills in automatically.
+          </EmptyState>
+        </Card>
+      ) : (
+        <>
+          <StatGrid>
+            <Stat label="Feedback items" value={total} icon="inbox" featured />
+            <Stat label="Categorised" value={`${pct(categorized)}%`} hint={`${categorized} of ${total}`} />
+            <Stat label="Positive sentiment" value={`${positivePercent}%`} hint={`${positive} of ${total}`} />
+          </StatGrid>
+
+          <div className="grid grid-2">
+            <Card>
+              <CardHeader
+                title="What the feedback is about"
+                hint="Every item, grouped by the category the classifier assigned."
+              />
+              <CardBody>
+                <CategoryPieChart categoryDistribution={stats?.by_category || {}} totalFeedback={total} />
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader
+                title="How customers feel"
+                actions={
+                  <Badge tone={SENTIMENT_TONE.positive}>{positivePercent}% positive</Badge>
+                }
+                hint="Sentiment across every item that carried a tone."
+              />
+              <CardBody className="stack stack-md">
+                <SentimentDonutChart
+                  positive={positive}
+                  neutral={stats?.by_sentiment?.neutral || 0}
+                  negative={stats?.by_sentiment?.negative || 0}
+                  healthScore={positivePercent}
+                />
+                <div className="stack stack-sm">
+                  {['positive', 'neutral', 'negative'].map((key) => {
+                    const count = stats?.by_sentiment?.[key] || 0;
+                    return (
+                      <div key={key} className="row" style={{ gap: 'var(--sp-2)' }}>
+                        <span
+                          className="dot"
+                          style={{ color: sentiment[key].line }}
+                          aria-hidden="true"
+                        />
+                        <span className="text-sm" style={{ textTransform: 'capitalize', width: 72 }}>
+                          {key}
+                        </span>
+                        <span className="text-sm text-muted flex-1">{count} items</span>
+                        <span className="text-sm text-semibold">{pct(count)}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardBody>
+            </Card>
           </div>
-          <div className="card-body">
-            <div className="breakdown-grid">
-              {Object.entries(stats.by_category).map(([category, count]) => (
-                <div key={category} className="breakdown-item">
-                  <span className="breakdown-label">{category.replace(/_/g, ' ')}</span>
-                  <span className="breakdown-bar-container">
-                    <span
-                      className="breakdown-bar"
-                      style={{ width: `${(count / (stats.total_feedback || 1)) * 100}%` }}
-                    />
+
+          <Card>
+            <CardHeader
+              title="Pipeline progress"
+              hint="Cleaning normalises the text; categorising assigns a category and sentiment."
+              actions={
+                cleaned === total && categorized === total ? (
+                  <Badge tone="success" icon="checkCircle">
+                    Up to date
+                  </Badge>
+                ) : (
+                  <Button variant="outline" size="sm" icon="zap" onClick={() => navigate('/insights')}>
+                    Finish processing
+                  </Button>
+                )
+              }
+            />
+            <CardBody className="stack stack-md">
+              <div className="stack stack-sm">
+                <div className="row row-between">
+                  <span className="text-sm">Cleaned</span>
+                  <span className="text-sm text-muted">
+                    {cleaned} of {total}
                   </span>
-                  <span className="breakdown-count">{count}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Source Breakdown */}
-      {stats && stats.by_source && Object.keys(stats.by_source).length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">🌐 Feedback Sources</h2>
-          </div>
-          <div className="card-body">
-            <div className="source-list">
-              {Object.entries(stats.by_source).map(([source, count]) => (
-                <div key={source} className="source-item">
-                  <span className="source-name">{source.replace(/_/g, ' ')}</span>
-                  <span className="source-count">{count}</span>
+                <ProgressBar value={pct(cleaned)} label="Cleaning progress" />
+              </div>
+              <div className="stack stack-sm">
+                <div className="row row-between">
+                  <span className="text-sm">Categorised</span>
+                  <span className="text-sm text-muted">
+                    {categorized} of {total}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+                <ProgressBar value={pct(categorized)} label="Categorisation progress" />
+              </div>
+            </CardBody>
+          </Card>
 
-      {/* Sentiment Breakdown */}
-      {stats && stats.by_sentiment && Object.keys(stats.by_sentiment).length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">😊 Sentiment Overview</h2>
-          </div>
-          <div className="card-body">
-            <div className="sentiment-row">
-              <div className="sentiment-chip positive">
-                🟢 Positive: {stats.by_sentiment.positive || 0}
+          <Card>
+            <CardHeader
+              title="Newest feedback"
+              hint={`The ${recentFeedback.length} most recent items in this workspace.`}
+              actions={
+                recentFeedback.length > 0 && (
+                  <Button variant="ghost" size="sm" iconRight="arrowRight" onClick={() => navigate('/feedback')}>
+                    View all {total}
+                  </Button>
+                )
+              }
+            />
+
+            {recentFeedback.length === 0 ? (
+              <EmptyState icon="inbox" title="Nothing here yet">
+                Once feedback is imported, the latest items appear in this list.
+              </EmptyState>
+            ) : (
+              <div className="table-responsive">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Item</th>
+                      <th scope="col">Category</th>
+                      <th scope="col">Sentiment</th>
+                      <th scope="col">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentFeedback.map((item) => (
+                      <tr key={item._id || item.title}>
+                        <td>
+                          <div className="table-primary">
+                            <strong className="clamp-2">
+                              {item.title || item.content?.slice(0, 90) || 'Untitled feedback'}
+                            </strong>
+                            {item.title && item.content && (
+                              <span className="table-secondary">{item.content}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          {item.category ? (
+                            <span
+                              className="badge"
+                              style={{
+                                background: tint(getCategoryColor(item.category)),
+                                color: getCategoryColor(item.category),
+                                borderColor: tint(getCategoryColor(item.category), 0.22),
+                              }}
+                            >
+                              {item.category.replace(/_/g, ' ')}
+                            </span>
+                          ) : (
+                            <span className="text-light">—</span>
+                          )}
+                        </td>
+                        <td>
+                          {item.sentiment ? (
+                            <Badge tone={SENTIMENT_TONE[item.sentiment] || 'neutral'}>{item.sentiment}</Badge>
+                          ) : (
+                            <span className="text-light">—</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="stack stack-sm">
+                            <span className="text-sm">{(item.source || 'review').replace(/_/g, ' ')}</span>
+                            <span className="text-xs text-muted">
+                              {item.customer_name || 'Anonymous'}
+                              {item.rating ? ` · ${stars(item.rating)}` : ''}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="sentiment-chip neutral">
-                🟡 Neutral: {stats.by_sentiment.neutral || 0}
-              </div>
-              <div className="sentiment-chip negative">
-                🔴 Negative: {stats.by_sentiment.negative || 0}
-              </div>
-            </div>
-          </div>
-        </div>
+            )}
+          </Card>
+        </>
       )}
     </div>
   );
 }
-
-export default Dashboard;
