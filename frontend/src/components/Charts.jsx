@@ -757,6 +757,9 @@ export function FeaturePriorityChart({ clusters = [] }) {
         const score = cluster.priority_score || 0;
         const isHovered = hoveredCluster?.id === cluster.id;
         const reqCount = cluster.request_count || 0;
+        // Workspaces without per-user identity cannot report requester breadth;
+        // showing the request count as "unique users" would double-count people.
+        const hasUserCount = cluster.score_breakdown?.unique_customers_count_basis !== 'unavailable';
         const userCount = cluster.unique_customers_count || reqCount;
 
         return (
@@ -816,7 +819,8 @@ export function FeaturePriorityChart({ clusters = [] }) {
             {/* Subtext: Counts & Breadth */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--sp-2)', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
               <span>
-                {reqCount} {reqCount === 1 ? 'request' : 'requests'} • {userCount} {userCount === 1 ? 'unique user' : 'unique users'}
+                {reqCount} {reqCount === 1 ? 'request' : 'requests'}
+                {hasUserCount ? ` • ${userCount} ${userCount === 1 ? 'unique user' : 'unique users'}` : ''}
               </span>
               {isHovered && cluster.score_breakdown && (
                 <span style={{ color: 'var(--text)', fontWeight: 500 }}>

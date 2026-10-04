@@ -13,9 +13,69 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from services.theme_extraction import extract_themes_from_feedback, extract_pain_points_from_feedback, extract_keywords_and_phrases
+from services.theme_extraction import (
+    extract_themes_from_feedback,
+    extract_pain_points_from_feedback,
+    extract_keywords_and_phrases,
+    assign_record_theme,
+)
 from services.clustering import cluster_feature_requests
 from services.trend_analysis import generate_trend_analysis, calculate_health_score
+
+
+class InsightsMergeValidation(unittest.TestCase):
+    """The AI layer must attach its pain points to matching evidence, not to positions."""
+
+    def test_ai_pain_points_pair_with_their_own_evidence(self):
+        from routers.insights import _merge_ai_pain_points
+
+        def record(index, text):
+            return {"_id": str(index), "title": "", "content": text, "rating": 1, "sentiment": "negative"}
+
+        feedback = [
+            record(1, "too many ads, cannot skip them at all"),
+            record(2, "app crashes every time I open a playlist"),
+        ]
+        # Deterministic groups in the opposite order to the AI list.
+        pain_points = [
+            {
+                "id": "pain_point_1",
+                "title": "Friction in Performance & Stability",
+                "sample_quotes": ["app crashes every time I open a playlist"],
+                "category": "bug_report",
+                "impact_score": 70.0,
+            },
+            {
+                "id": "pain_point_2",
+                "title": "Friction in UI & User Experience",
+                "sample_quotes": ["too many ads, cannot skip them at all"],
+                "category": "general_feedback",
+                "impact_score": 50.0,
+            },
+        ]
+        ai_pain_points = [
+            {"title": "Excessive Ads with No Skip Option", "keywords": ["ads", "skip"], "impact_score": 85.0},
+            {"title": "Frequent App Crashes", "keywords": ["crashes"], "impact_score": 88.0},
+        ]
+
+        merged = _merge_ai_pain_points(pain_points, ai_pain_points, feedback)
+        by_title = {p["title"]: p for p in merged}
+
+        self.assertIn("Frequent App Crashes", by_title)
+        self.assertEqual(by_title["Frequent App Crashes"]["sample_quotes"], ["app crashes every time I open a playlist"])
+        self.assertIn("Excessive Ads with No Skip Option", by_title)
+        self.assertEqual(by_title["Excessive Ads with No Skip Option"]["sample_quotes"], ["too many ads, cannot skip them at all"])
+
+    def test_cluster_evidence_matching_is_whole_word(self):
+        from routers.insights import _match_records_by_terms
+
+        records = [
+            {"_id": "1", "content": "the ads are unbearable"},
+            {"_id": "2", "content": "downloads are very slow"},
+            {"_id": "3", "content": "no skip button for ads"},
+        ]
+        matched = _match_records_by_terms(records, ["ads"])
+        self.assertEqual([r["_id"] for r in matched], ["1", "3"])
 
 
 class Milestone2Validation(unittest.TestCase):
@@ -80,23 +140,34 @@ class Milestone2Validation(unittest.TestCase):
     def test_extract_themes(self):
         themes = extract_themes_from_feedback(self.sample_dataset)
         self.assertGreater(len(themes), 0)
-        theme_titles = [t["title"] for t in themes]
-        # Should detect themes related to Auth, UI/Theming, Performance, etc.
-        self.assertTrue(
-            any("Authentication" in t or "Performance" in t or "UI" in t or "Export" in t for t in theme_titles)
-        )
+
+        # Themes are mined from the records, so the two dark-theme requests must show
+        # up as an identifiable topic instead of a hardcoded domain label.
+        dark_theme = next((t for t in themes if "dark" in " ".join(t["keywords"]).lower()), None)
+        self.assertIsNotNone(dark_theme)
+        self.assertGreaterEqual(dark_theme["frequency"], 2)
+
+        # Every record is assigned to a mined theme (or honestly left unclassified).
+        assigned = [assign_record_theme(f"{it['title']} {it['content']}", themes) for it in self.sample_dataset]
+        self.assertEqual(len(assigned), len(self.sample_dataset))
+        self.assertIn(dark_theme["title"], assigned)
+
         for theme in themes:
             self.assertIn("frequency", theme)
             self.assertIn("sentiment_score", theme)
             self.assertIn("keywords", theme)
+            self.assertIn("match_phrases", theme)
 
     def test_extract_pain_points_severity_and_impact(self):
         pain_points = extract_pain_points_from_feedback(self.sample_dataset)
         self.assertGreater(len(pain_points), 0)
 
-        # Pain points should include Login/Auth or Performance issues
-        titles = [p["title"] for p in pain_points]
-        self.assertTrue(any("Authentication" in t or "Performance" in t for t in titles))
+        # Pain point titles must be built from the complaint language itself.
+        titles = [p["title"].lower() for p in pain_points]
+        self.assertTrue(
+            any(word in title for title in titles for word in ("login", "crash", "slow", "dashboard")),
+            f"pain point titles are not grounded in the complaints: {titles}",
+        )
 
         # Check severity and impact scores
         for pp in pain_points:
@@ -146,7 +217,16 @@ class Milestone2Validation(unittest.TestCase):
         status = check_ai_status()
         self.assertIn("available", status)
         self.assertIn("provider", status)
-        self.assertIn(status["provider"], ["Google Gemini (Pure AI)", "Groq", "None"])
+        self.assertIn("model", status)
+        # The provider is reported honestly in fallback-chain order, and "None" only when
+        # no key at all is configured.
+        if status["available"]:
+            self.assertNotEqual(status["provider"], "None")
+            self.assertTrue(status["model"])
+            for name in status["provider"].split(" + "):
+                self.assertIn(name, ["Gemini", "Mistral", "Groq"])
+        else:
+            self.assertEqual(status["provider"], "None")
 
         # Fallback handling on empty input
         res = analyze_feedback_with_ai([])

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import Icon from '../components/Icon';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -22,6 +23,7 @@ import {
   SkeletonList,
   Tabs,
   Textarea,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const STATUS_TONE = { draft: 'neutral', in_review: 'warning', approved: 'success', archived: 'neutral' };
@@ -75,8 +77,7 @@ export default function PRDWorkspace() {
   const navigate = useNavigate();
   const { begin } = useBusy();
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [workspaceId, setWorkspaceId] = useState('');
+  const { activeId: workspaceId, ready } = useWorkspaces();
   const [prds, setPrds] = useState([]);
   const [selected, setSelected] = useState(null);
   const [clusters, setClusters] = useState([]);
@@ -133,35 +134,17 @@ export default function PRDWorkspace() {
     }
   }, []);
 
+  // Both lists follow the shared selection, so switching workspace anywhere in
+  // the app reloads this page as well.
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get('/workspaces');
-        setWorkspaces(data);
-        if (data.length === 0) {
-          setLoading(false);
-          return;
-        }
-        const stored = localStorage.getItem('pm_copilot_active_ws');
-        const active = stored && data.some((w) => (w._id || w.id) === stored)
-          ? stored
-          : data[0]._id || data[0].id;
-        setWorkspaceId(active);
-        localStorage.setItem('pm_copilot_active_ws', active);
-        await Promise.all([loadPrds(active), loadContext(active)]);
-      } catch {
-        setError('Could not load your workspaces.');
-        setLoading(false);
-      }
-    })();
-  }, [loadPrds, loadContext]);
+    if (!workspaceId) return undefined;
+    Promise.all([loadPrds(workspaceId), loadContext(workspaceId)]);
+    return undefined;
+  }, [workspaceId, loadPrds, loadContext]);
 
-  const changeWorkspace = async (event) => {
-    const id = event.target.value;
-    setWorkspaceId(id);
-    localStorage.setItem('pm_copilot_active_ws', id);
-    await Promise.all([loadPrds(id), loadContext(id)]);
-  };
+  useEffect(() => {
+    if (ready && !workspaceId) setLoading(false);
+  }, [ready, workspaceId]);
 
   const changeStatus = async (status) => {
     if (!selected) return;
@@ -259,23 +242,7 @@ export default function PRDWorkspace() {
         description="Requirement documents written from this workspace's own feedback — personas, scope, requirements, SLAs and metrics."
         actions={
           <>
-            <div className="workspace-selector-box">
-              <label className="ws-label" htmlFor="prd-workspace">
-                Workspace
-              </label>
-              <select
-                id="prd-workspace"
-                className="ws-dropdown"
-                value={workspaceId}
-                onChange={changeWorkspace}
-              >
-                {workspaces.map((ws) => (
-                  <option key={ws._id || ws.id} value={ws._id || ws.id}>
-                    {ws.name || ws.title || 'Untitled workspace'}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <WorkspaceSwitcher />
             <Button
               variant="primary"
               icon="sparkle"

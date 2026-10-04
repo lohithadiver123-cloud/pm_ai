@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import api from '../services/api';
 import Icon from '../components/Icon';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -21,6 +22,7 @@ import {
   Tabs,
   Textarea,
   Toolbar,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const FRAMEWORKS = [
@@ -76,8 +78,7 @@ const IMPACT_OPTIONS = [
 export default function PrioritizationHub() {
   const { begin } = useBusy();
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [workspaceId, setWorkspaceId] = useState('');
+  const { activeId: workspaceId, ready } = useWorkspaces();
   const [items, setItems] = useState([]);
   const [weights, setWeights] = useState({
     customer_demand_weight: 0.35,
@@ -125,35 +126,15 @@ export default function PrioritizationHub() {
     }
   }, []);
 
+  // The initiative list follows the shared selection, so a switch anywhere in
+  // the app reloads this page too.
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get('/workspaces');
-        setWorkspaces(data);
-        if (data.length === 0) {
-          setLoading(false);
-          return;
-        }
-        const stored = localStorage.getItem('pm_copilot_active_ws');
-        const active = stored && data.some((w) => (w._id || w.id) === stored)
-          ? stored
-          : data[0]._id || data[0].id;
-        setWorkspaceId(active);
-        localStorage.setItem('pm_copilot_active_ws', active);
-        await loadData(active);
-      } catch {
-        setError('Could not load your workspaces.');
-        setLoading(false);
-      }
-    })();
-  }, [loadData]);
+    if (workspaceId) loadData(workspaceId);
+  }, [workspaceId, loadData]);
 
-  const changeWorkspace = (event) => {
-    const id = event.target.value;
-    setWorkspaceId(id);
-    localStorage.setItem('pm_copilot_active_ws', id);
-    loadData(id);
-  };
+  useEffect(() => {
+    if (ready && !workspaceId) setLoading(false);
+  }, [ready, workspaceId]);
 
   const runWorkspaceAction = async (key, path, label, message) => {
     const done = begin(label);
@@ -301,18 +282,7 @@ export default function PrioritizationHub() {
         description="Rank the same initiative list four ways — RICE, value against effort, MoSCoW, and your own weighted model."
         actions={
           <>
-            <div className="workspace-selector-box">
-              <label className="ws-label" htmlFor="prio-workspace">
-                Workspace
-              </label>
-              <select id="prio-workspace" className="ws-dropdown" value={workspaceId} onChange={changeWorkspace}>
-                {workspaces.map((ws) => (
-                  <option key={ws._id || ws.id} value={ws._id || ws.id}>
-                    {ws.name || ws.title || 'Untitled workspace'}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <WorkspaceSwitcher />
             <Button variant="primary" icon="plus" disabled={!workspaceId} onClick={() => setShowAdd(true)}>
               Add initiative
             </Button>

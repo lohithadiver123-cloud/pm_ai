@@ -1,13 +1,34 @@
 """
 Theme extraction and Customer Pain-Point identification engine.
-Provides NLP theme mining, keyword clustering, and impact-weighted pain point detection with explainable formulas.
+
+Themes and pain points are mined from the feedback itself: the recurring phrases users
+write are the topics, and each topic's severity/impact is a deterministic function of
+the records inside it. Nothing here names a product, a feature or a domain, so the same
+engine describes a music app, a bank app or an internal tool without modification.
 """
 
-import re
-from collections import Counter, defaultdict
-from typing import List, Dict, Any, Tuple
-from services.preprocessing import normalize, STOPWORDS_SET
+from collections import Counter
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 from services.categorization import detect_sentiment, categorize
+from services.preprocessing import normalize, STOPWORDS_SET
+from services.text_mining import (
+    build_surface_index,
+    display_phrase,
+    group_by_phrases,
+    group_keywords,
+    label_group,
+    record_text,
+    titleize,
+    top_phrases,
+)
+
+
+UNCLASSIFIED_THEME = "Unclassified mentions"
+
+# A topic may describe up to this share of a corpus; beyond that it is the corpus itself.
+THEME_MAX_SHARE = 0.6
+PAIN_POINT_MAX_SHARE = 0.5
 
 
 def _resolve_sentiment(item: Dict[str, Any]) -> str:
@@ -26,56 +47,6 @@ def _resolve_category(item: Dict[str, Any]) -> str:
     return categorize(text)
 
 
-
-# Domain topics definition with comprehensive semantic keywords
-DOMAIN_TOPICS = {
-    "Authentication & Access": [
-        "login", "signin", "sign in", "signup", "sign up", "password", "password reset",
-        "auth", "token", "session", "2fa", "mfa", "logout", "unexpected logout",
-        "account", "register", "credential", "reset", "biometric", "face id", "fingerprint",
-        "multiple account", "switch account"
-    ],
-    "Performance & Stability": [
-        "slow", "lag", "latency", "load", "loading", "freeze", "freezes", "crash", "crashes",
-        "performance", "delay", "responsive", "unresponsive", "memory", "timeout", "fps",
-        "battery", "heating", "stuck", "smooth", "faster", "good performance"
-    ],
-    "UI & User Experience": [
-        "ui", "ux", "design", "layout", "button", "navigation", "theme", "dark mode",
-        "interface", "cluttered", "font", "accessibility", "screen-reader", "larger text",
-        "clean", "simple", "onboarding", "confusing", "setup", "ads", "advertisements"
-    ],
-    "Search & Filtering": [
-        "search", "filter", "sort", "find", "query", "lookup", "pagination", "results",
-        "inaccurate", "misses", "exact match"
-    ],
-    "Notifications & Alerts": [
-        "notification", "email", "alert", "push", "message", "remind", "reminder",
-        "webhook", "outdated information", "late", "delivered"
-    ],
-    "Data Management & Sync": [
-        "import", "export", "csv", "json", "excel", "upload", "download", "file",
-        "parsing", "format", "sync", "data sync", "backup", "appear"
-    ],
-    "Billing & Payments": [
-        "billing", "price", "pricing", "plan", "subscription", "payment", "payment failed",
-        "invoice", "cost", "upgrade", "deducted", "refund"
-    ],
-    "Customer Support & Service": [
-        "support", "customer support", "helpful support", "support team", "responded", "solved my issue", "agent"
-    ]
-}
-
-
-# Pre-compile domain topic matchers for ultra-fast performance on 10k+ records
-_COMPILED_DOMAIN_TOPICS = []
-for _topic, _kws in DOMAIN_TOPICS.items():
-    _phrases = [k for k in _kws if " " in k]
-    _singles = [k for k in _kws if " " not in k]
-    _single_re = re.compile(r'\b(?:' + '|'.join(re.escape(k) for k in _singles) + r')\b') if _singles else None
-    _COMPILED_DOMAIN_TOPICS.append((_topic, _phrases, _single_re))
-
-
 def extract_ngrams(tokens: List[str], n: int = 2) -> List[str]:
     """Generate n-grams from a list of tokens."""
     if len(tokens) < n:
@@ -85,167 +56,213 @@ def extract_ngrams(tokens: List[str], n: int = 2) -> List[str]:
 
 def extract_keywords_and_phrases(texts: List[str], top_k: int = 8) -> List[Tuple[str, int]]:
     """
-    Extract most frequent relevant unigrams and bigrams.
-    Samples representative items on large datasets (10k+) for sub-second execution.
-    """
-    unigram_counts = Counter()
-    bigram_counts = Counter()
+    Extract most frequent relevant unigrams and bigrams from a list of texts.
 
-    # Subsample up to 400 representative texts to prevent CPU thrashing
-    sample_texts = texts[:400] if len(texts) > 400 else texts
+    Samples evenly across the corpus (callers pass newest-first feedback, so a head
+    slice would describe only the latest records) to keep execution sub-second.
+    """
+    unigram_counts: Counter = Counter()
+    bigram_counts: Counter = Counter()
+
+    if len(texts) > 400:
+        stride = len(texts) / 400
+        sample_texts = [texts[int(index * stride)] for index in range(400)]
+    else:
+        sample_texts = texts
 
     for text in sample_texts:
         tokens = normalize(text)
         filtered_tokens = [t for t in tokens if len(t) > 2 and t not in STOPWORDS_SET]
         unigram_counts.update(filtered_tokens)
-        bigrams = extract_ngrams(filtered_tokens, 2)
-        bigram_counts.update(bigrams)
+        bigram_counts.update(extract_ngrams(filtered_tokens, 2))
 
     combined = unigram_counts.most_common(top_k) + bigram_counts.most_common(top_k // 2)
     return sorted(combined, key=lambda x: x[1], reverse=True)[:top_k]
 
 
-def match_domain_topic(text: str) -> str:
-    """Find the best domain topic for a text string using pre-compiled regex."""
-    if not text:
-        return "General Product Usage"
-    text_lower = text.lower()
-    for topic_name, phrase_kws, single_re in _COMPILED_DOMAIN_TOPICS:
-        for kw in phrase_kws:
-            if kw in text_lower:
-                return topic_name
-        if single_re and single_re.search(text_lower):
-            return topic_name
-    return "General Product Usage"
+def _representative_quotes(items: List[Dict[str, Any]], limit: int = 3) -> List[str]:
+    seen = set()
+    quotes = []
+    for item in items:
+        quote = (item.get("content") or item.get("title") or "").strip()
+        if quote and quote not in seen and len(quotes) < limit:
+            seen.add(quote)
+            quotes.append(quote[:130] + ("..." if len(quote) > 130 else ""))
+    return quotes
 
 
-def extract_themes_from_feedback(feedback_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _group_members(
+    items: List[Dict[str, Any]],
+    max_groups: int,
+    max_share: float,
+    min_size: int = 2,
+):
+    """Mine phrase groups from a record list, with everything needed to describe them."""
+    phrases_per_item, surface_index = build_surface_index(items)
+    groups, corpus_freq = group_by_phrases(
+        phrases_per_item,
+        max_groups=max_groups,
+        max_share=max_share,
+        min_size=min_size,
+    )
+    return groups, corpus_freq, phrases_per_item, surface_index
+
+
+def extract_themes_from_feedback(feedback_list: List[Dict[str, Any]], max_themes: int = 8) -> List[Dict[str, Any]]:
     """
-    Extract high-level product themes across feedback items.
-    Groups feedback by detected topics and computes exact theme statistics.
+    Group all feedback into the topics users actually write about.
+
+    Each theme is a mined phrase; its frequency, sentiment split and keywords are
+    computed from the records inside it.
     """
     if not feedback_list:
         return []
 
-    topic_feedback = defaultdict(list)
-
-    for item in feedback_list:
-        content = item.get("content") or ""
-        title = item.get("title") or ""
-        full_text = f"{title} {content}".strip()
-        topic = match_domain_topic(full_text)
-        topic_feedback[topic].append(item)
+    groups, corpus_freq, phrases_per_item, surface_index = _group_members(
+        feedback_list, max_groups=max_themes, max_share=THEME_MAX_SHARE
+    )
 
     themes = []
-    theme_idx = 1
+    used_labels: Set[str] = set()
+    for seed, members in groups:
+        items = [feedback_list[index] for index in members]
+        total = len(items)
 
-    for topic_name, items in sorted(topic_feedback.items(), key=lambda x: len(x[1]), reverse=True):
-        if not items:
-            continue
+        phrase_freq: Counter = Counter()
+        for index in members:
+            phrase_freq.update(phrases_per_item[index])
 
-        total_topic_items = len(items)
+        title = label_group(
+            seed,
+            phrase_freq,
+            corpus_freq,
+            len(feedback_list),
+            surface_index,
+            used_labels,
+            max_share=THEME_MAX_SHARE,
+            fallback=UNCLASSIFIED_THEME,
+        )
+        used_labels.add(title.lower())
+
         pos = sum(1 for it in items if _resolve_sentiment(it) == "positive")
         neg = sum(1 for it in items if _resolve_sentiment(it) == "negative")
-        neu = sum(1 for it in items if _resolve_sentiment(it) == "neutral")
+        neu = total - pos - neg
+        sentiment_score = round((pos - neg) / total, 2) if total else 0.0
 
-        sentiment_score = round((pos - neg) / (total_topic_items if total_topic_items > 0 else 1), 2)
-
-        # Dominant category
         category_counts = Counter(_resolve_category(it) for it in items)
-        dominant_cat = category_counts.most_common(1)[0][0] if category_counts else "general_feedback"
+        dominant_category = category_counts.most_common(1)[0][0] if category_counts else "general_feedback"
 
-        # Keywords
-        topic_texts = [f"{it.get('title', '')} {it.get('content', '')}" for it in items]
-        top_kws = [kw for kw, _ in extract_keywords_and_phrases(topic_texts, top_k=6)]
-
-        # Deduplicated sample quotes
-        seen_quotes = set()
-        quotes = []
-        for it in items:
-            q = (it.get("content") or it.get("title") or "").strip()
-            if q and q not in seen_quotes and len(quotes) < 3:
-                seen_quotes.add(q)
-                quotes.append(q[:130] + ("..." if len(q) > 130 else ""))
-
-        desc = (
-            f"Discussed across {total_topic_items} feedback records ({pos} positive, {neu} neutral, {neg} negative). "
-            f"Primary focus relates to {dominant_cat.replace('_', ' ')}."
+        keywords = group_keywords(
+            title, phrase_freq, corpus_freq, surface_index, len(feedback_list), max_share=THEME_MAX_SHARE
         )
+        match_phrases = [
+            phrase for phrase in sorted(phrase_freq, key=lambda p: (-phrase_freq[p], p))
+            if phrase_freq[phrase] > 0
+        ][:8]
 
         themes.append({
-            "id": f"theme_{theme_idx}",
-            "title": topic_name,
-            "description": desc,
-            "category": dominant_cat,
-            "frequency": total_topic_items,
-            "sentiment_breakdown": {
-                "positive": pos,
-                "neutral": neu,
-                "negative": neg,
-            },
+            "id": f"theme_{len(themes) + 1}",
+            "title": title,
+            "description": (
+                f"Discussed in {total} feedback records ({pos} positive, {neu} neutral, {neg} negative). "
+                f"Most of these records are {dominant_category.replace('_', ' ')}."
+            ),
+            "category": dominant_category,
+            "frequency": total,
+            "sentiment_breakdown": {"positive": pos, "neutral": neu, "negative": neg},
             "sentiment_score": sentiment_score,
-            "keywords": top_kws,
-            "sample_quotes": quotes,
+            "keywords": keywords,
+            "match_phrases": match_phrases,
+            "sample_quotes": _representative_quotes(items),
         })
-        theme_idx += 1
 
+    themes.sort(key=lambda theme: theme["frequency"], reverse=True)
+    for index, theme in enumerate(themes, start=1):
+        theme["id"] = f"theme_{index}"
     return themes
 
 
-def extract_pain_points_from_feedback(feedback_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def assign_record_theme(text: str, themes: List[Dict[str, Any]]) -> str:
     """
-    Identify and score customer pain points with deterministic, explainable impact formulas.
+    The theme a single feedback record belongs to, by longest matching mined phrase.
+
+    Records that match no mined phrase are reported honestly as unclassified rather than
+    being forced into a bucket that would misstate what they are about.
     """
-    if not feedback_list:
-        return []
+    lowered = (text or "").lower()
+    best_title, best_length = None, 0
+    for theme in themes or []:
+        for phrase in theme.get("match_phrases") or []:
+            if phrase in lowered and len(phrase) > best_length:
+                best_title, best_length = theme.get("title", UNCLASSIFIED_THEME), len(phrase)
+    return best_title or UNCLASSIFIED_THEME
 
-    total_count = max(len(feedback_list), 1)
 
-    # Filter items that are pain points
-    issue_candidates = []
+def _issue_candidates(feedback_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Records that report a problem: negative sentiment, an issue category, or a low rating."""
+    candidates = []
     for item in feedback_list:
         sentiment = _resolve_sentiment(item)
         category = _resolve_category(item)
         rating = item.get("rating")
-
         is_pain = (
             sentiment == "negative"
             or category in ("bug_report", "performance_issue")
             or (rating is not None and rating <= 2)
         )
         if is_pain:
-            issue_candidates.append(item)
+            candidates.append(item)
+    return candidates
 
+
+def extract_pain_points_from_feedback(
+    feedback_list: List[Dict[str, Any]],
+    max_pain_points: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Identify and score customer pain points from the complaints themselves.
+
+    Each pain point is a mined phrase from the complaint set; its impact score is a
+    deterministic function of volume, rating, negative sentiment and bug ratio.
+    """
+    if not feedback_list:
+        return []
+
+    issue_candidates = _issue_candidates(feedback_list)
     if not issue_candidates:
         return []
 
-    # Group issues by matched domain area
-    grouped_issues = defaultdict(list)
-    for item in issue_candidates:
-        full_text = f"{(item.get('title') or '')} {(item.get('content') or '')}".strip()
-        topic = match_domain_topic(full_text)
-        if topic == "General Product Usage":
-            topic = "System Usability & Stability"
-        grouped_issues[topic].append(item)
+    total_count = max(len(feedback_list), 1)
+    groups, corpus_freq, phrases_per_item, surface_index = _group_members(
+        issue_candidates,
+        max_groups=max_pain_points,
+        max_share=PAIN_POINT_MAX_SHARE,
+        min_size=1,
+    )
 
     pain_points = []
-    idx = 1
-
-    recommendations_map = {
-        "Authentication & Access": "Streamline password reset delivery, investigate token expirations, and test biometric login workflows.",
-        "Performance & Stability": "Profile memory leaks on mobile devices, optimize UI render loops, and resolve crash-inducing timeouts.",
-        "UI & User Experience": "Improve dark mode contrast, ensure screen reader accessibility, and simplify the onboarding flow.",
-        "Search & Filtering": "Upgrade search indexing, enable fuzzy matching, and test exact keyword query relevance.",
-        "Notifications & Alerts": "Optimize push notification queues, address dispatch delays, and verify email template accuracy.",
-        "Data Management & Sync": "Add background retry for cloud data sync and provide clear progress indicators during file uploads.",
-        "Billing & Payments": "Integrate real-time payment gateway error handling and verify automated receipt/invoice generation.",
-        "System Usability & Stability": "Conduct usability testing and resolve blocking client-side exceptions.",
-    }
-
-    for group_name, items in sorted(grouped_issues.items(), key=lambda x: len(x[1]), reverse=True):
+    used_labels: Set[str] = set()
+    for seed, members in groups:
+        items = [issue_candidates[index] for index in members]
         count = len(items)
         if count == 0:
             continue
+
+        phrase_freq: Counter = Counter()
+        for index in members:
+            phrase_freq.update(phrases_per_item[index])
+
+        title = label_group(
+            seed,
+            phrase_freq,
+            corpus_freq,
+            len(issue_candidates),
+            surface_index,
+            used_labels,
+            max_share=PAIN_POINT_MAX_SHARE,
+            fallback="Unclassified complaints",
+        )
+        used_labels.add(title.lower())
 
         ratings = [it.get("rating") for it in items if it.get("rating") is not None]
         avg_rating = round(sum(ratings) / len(ratings), 1) if ratings else 2.0
@@ -253,20 +270,14 @@ def extract_pain_points_from_feedback(feedback_list: List[Dict[str, Any]]) -> Li
         negative_pct = round((neg_count / count) * 100, 1)
         bug_count = sum(1 for it in items if _resolve_category(it) in ("bug_report", "performance_issue"))
 
-        # Deterministic Impact Score Formula (0 to 100):
-        # 1. Volume Factor (up to 35 pts)
+        # Deterministic impact formula (0-100):
+        # volume (35) + rating penalty (25) + negative share (25) + bug share (15)
         vol_factor = min(35.0, (count / total_count) * 100.0 * 2.0)
-        # 2. Rating Penalty (up to 25 pts)
         rating_penalty = max(0.0, (5.0 - avg_rating) * 5.0)
-        # 3. Negative Sentiment Ratio (up to 25 pts)
         neg_factor = (neg_count / count) * 25.0
-        # 4. Bug Report Factor (up to 15 pts)
         bug_factor = (bug_count / count) * 15.0
+        impact_score = round(min(98.0, max(20.0, vol_factor + rating_penalty + neg_factor + bug_factor)), 1)
 
-        raw_score = vol_factor + rating_penalty + neg_factor + bug_factor
-        impact_score = round(min(98.0, max(20.0, raw_score)), 1)
-
-        # Severity
         if impact_score >= 60.0 or count >= 10 or (avg_rating <= 1.5 and neg_count > 5):
             severity = "high"
         elif impact_score >= 40.0 or count >= 3:
@@ -274,42 +285,53 @@ def extract_pain_points_from_feedback(feedback_list: List[Dict[str, Any]]) -> Li
         else:
             severity = "low"
 
-
-        # Deduplicate sample quotes
-        seen_quotes = set()
-        quotes = []
-        for it in items:
-            q = (it.get("content") or it.get("title") or "").strip()
-            if q and q not in seen_quotes and len(quotes) < 3:
-                seen_quotes.add(q)
-                quotes.append(q[:130] + ("..." if len(q) > 130 else ""))
-
-        rec = recommendations_map.get(
-            group_name,
-            "Triage incoming issue tickets with engineering and prioritize stability fixes in the upcoming sprint."
-        )
+        terms = ", ".join(group_keywords(
+            title, phrase_freq, corpus_freq, surface_index, len(issue_candidates), max_share=PAIN_POINT_MAX_SHARE
+        )[1:4]) or title.lower()
 
         pain_points.append({
-            "id": f"pain_point_{idx}",
-            "title": f"Friction in {group_name}",
-            "description": f"Observed in {count} customer complaints ({neg_count} negative sentiment, avg rating {avg_rating}/5.0).",
+            "id": "",
+            "title": title,
+            "description": (
+                f"{count} complaints mention {terms} (avg rating {avg_rating}/5.0, "
+                f"{neg_count} negative, {bug_count} bug or performance reports)."
+            ),
             "severity": severity,
             "impact_score": impact_score,
             "affected_users_count": count,
-            "category": items[0].get("category") or "bug_report",
-            "recommended_action": rec,
-            "sample_quotes": quotes,
-            "distinct_sample_quotes": quotes,
+            "category": _dominant_category(items),
+            "recommended_action": (
+                f"Review the {count} reports mentioning {terms} and re-run this analysis after the "
+                f"change to confirm the negative share ({negative_pct}%) falls."
+            ),
+            "keywords": group_keywords(
+                title, phrase_freq, corpus_freq, surface_index, len(issue_candidates), max_share=PAIN_POINT_MAX_SHARE
+            ),
+            "match_phrases": [
+                phrase for phrase in sorted(phrase_freq, key=lambda p: (-phrase_freq[p], p))
+                if phrase_freq[phrase] > 0
+            ][:8],
+            "sample_quotes": _representative_quotes(items),
+            "distinct_sample_quotes": _representative_quotes(items),
             "score_breakdown": {
                 "frequency": count,
                 "negative_sentiment_pct": negative_pct,
                 "avg_rating": avg_rating,
                 "bug_count": bug_count,
                 "severity_level": severity,
-                "formula_weights": "Volume (35%) + Low Rating (25%) + Negative % (25%) + Bug Ratio (15%)"
-            }
+                "formula_weights": "Volume (35%) + Low Rating (25%) + Negative % (25%) + Bug Ratio (15%)",
+            },
         })
-        idx += 1
 
+    # Rank-stable ids: pain_point_1 is always the highest-impact pain point. The PRD,
+    # user-story and prioritisation services ground documents on these ids.
     pain_points.sort(key=lambda x: x["impact_score"], reverse=True)
+    pain_points = pain_points[:max_pain_points]
+    for rank, pain_point in enumerate(pain_points, start=1):
+        pain_point["id"] = f"pain_point_{rank}"
     return pain_points
+
+
+def _dominant_category(items: List[Dict[str, Any]]) -> str:
+    counts = Counter(_resolve_category(it) for it in items)
+    return counts.most_common(1)[0][0] if counts else "general_feedback"

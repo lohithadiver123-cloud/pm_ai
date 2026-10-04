@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import Icon from '../components/Icon';
 import { Alert, Button, IconButton, Spinner } from './ui';
+import { useWorkspaces } from '../context/WorkspaceContext';
 
 const WELCOME =
   'Ask me anything about this workspace — the loudest complaints, the highest-scoring feature, or what to cut.';
@@ -52,7 +53,9 @@ export default function FloatingCopilot() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
 
-  const workspaceId = localStorage.getItem('pm_copilot_active_ws');
+  // Read from the provider rather than localStorage so the thread follows a
+  // workspace switch made on the page underneath.
+  const { activeId: workspaceId } = useWorkspaces();
   const bottomRef = useRef(null);
 
   useEffect(() => {

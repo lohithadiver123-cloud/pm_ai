@@ -10,6 +10,7 @@ export { default as Button, IconButton } from './Button';
 export { Card, CardHeader, CardBody, CardFooter, Stat, StatGrid } from './Card';
 export { PageHeader, Section, Toolbar, ToolbarField } from './Layout';
 export { Field, Input, Textarea, Select, SearchInput, Segmented } from './Controls';
+export { default as WorkspaceSwitcher } from './WorkspaceSwitcher';
 export { Tabs } from './Tabs';
 export { default as Modal } from './Modal';
 export {

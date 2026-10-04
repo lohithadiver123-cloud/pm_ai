@@ -18,6 +18,7 @@ class ThemeItem(BaseModel):
     sentiment_breakdown: Dict[str, int] = Field(default_factory=dict, description="Counts of positive/neutral/negative")
     sentiment_score: float = Field(0.0, description="Normalized sentiment score from -1.0 to 1.0")
     keywords: List[str] = Field(default_factory=list, description="Top keywords associated with theme")
+    match_phrases: List[str] = Field(default_factory=list, description="Mined phrases used to assign records to this theme")
     sample_quotes: List[str] = Field(default_factory=list, description="Representative quotes from feedback")
 
 
@@ -32,6 +33,8 @@ class PainPointItem(BaseModel):
     category: str = Field(..., description="Category: bug_report, performance_issue, general_feedback, etc.")
     root_cause: Optional[str] = Field(None, description="AI-diagnosed underlying root cause of friction")
     recommended_action: str = Field(..., description="Actionable recommendation for product/engineering team")
+    keywords: List[str] = Field(default_factory=list, description="Mined phrases describing this pain point")
+    match_phrases: List[str] = Field(default_factory=list, description="Mined phrases used to group these complaints")
     sample_quotes: List[str] = Field(default_factory=list, description="Customer quotes highlighting this pain point")
     distinct_sample_quotes: List[str] = Field(default_factory=list, description="Deduplicated customer quotes")
     score_breakdown: Optional[Dict[str, Any]] = Field(None, description="Deterministic components used to compute the impact score")

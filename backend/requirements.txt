@@ -31,3 +31,6 @@ groq>=0.9.0
 crewai>=0.80.0
 langchain-groq>=0.2.0
 
+# OpenAI-compatible clients (Mistral free tier and any OpenAI-compatible provider)
+openai>=1.40.0
+

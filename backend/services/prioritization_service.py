@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 from config import settings
-from services.ai_service import get_gemini_client, get_groq_client, _extract_json_from_text, GEMINI_MODELS, GROQ_MODELS
+from services.ai_service import get_gemini_client, get_groq_client, get_mistral_client, _extract_json_from_text, GEMINI_MODELS, GROQ_MODELS, MISTRAL_MODELS
 import database
 from database import db
 import fallback_db
@@ -223,11 +223,18 @@ async def auto_seed_prioritization_from_insights(workspace_id: str) -> List[Dict
             "weighted": {
                 "customer_demand_score": round(min(98.0, priority_raw + 5), 1),
                 "business_impact_score": round(min(95.0, priority_raw), 1),
-                "feasibility_score": 75.0,
-                "risk_mitigation_score": 65.0,
+                # Feasibility and delivery risk cannot be derived from customer feedback, so
+                # they start neutral instead of inheriting an invented score.
+                "feasibility_score": 50.0,
+                "risk_mitigation_score": 50.0,
                 "final_score": 0.0,
             },
-            "ai_rationale": f"Derived from {count} customer requests. High demand tier with {demand_level} user urgency.",
+            "ai_rationale": (
+                f"Seeded from {count} requests mentioning this topic ({demand_level} demand tier, "
+                f"priority score {priority_raw}). Estimated RICE inputs: reach {reach:.0f}, impact "
+                f"{impact}, confidence {confidence}, effort {effort}; set feasibility and risk to "
+                f"re-rank."
+            ),
             "feedback_count": count,
             "rank": idx + 1,
             "created_at": now.isoformat(),
@@ -274,11 +281,16 @@ async def auto_seed_prioritization_from_insights(workspace_id: str) -> List[Dict
             "weighted": {
                 "customer_demand_score": round(min(98.0, impact_raw), 1),
                 "business_impact_score": round(min(96.0, impact_raw + 2), 1),
-                "feasibility_score": 80.0,
-                "risk_mitigation_score": 90.0,
+                # Neutral placeholders, as above: not derivable from feedback.
+                "feasibility_score": 50.0,
+                "risk_mitigation_score": 50.0,
                 "final_score": 0.0,
             },
-            "ai_rationale": f"High friction issue impacting {affected} reported users. Severity: {severity}. Urgent fix recommended.",
+            "ai_rationale": (
+                f"Seeded from {affected} reports about this pain point (severity {severity}, impact "
+                f"{impact_raw}/100). Estimated RICE inputs: reach {reach:.0f}, impact {impact}, "
+                f"confidence {confidence}, effort {effort}; set feasibility and risk to re-rank."
+            ),
             "feedback_count": affected,
             "rank": len(seeded_items) + 1,
             "created_at": now.isoformat(),
@@ -497,6 +509,55 @@ Return ONLY a valid JSON object matching this schema:
                     break
             except Exception as e:
                 logger.warning(f"AI prioritization evaluation error on {g_model}: {e}...")
+
+    # 2. Attempt Mistral AI Fallback (free Experiment tier, OpenAI-compatible)
+    if not parsed_evals:
+        mistral_client = get_mistral_client()
+        if mistral_client:
+            for m_name in MISTRAL_MODELS:
+                try:
+                    logger.info(f"Running AI prioritization evaluation with Mistral {m_name}...")
+                    response = mistral_client.chat.completions.create(
+                        model=m_name,
+                        messages=[
+                            {"role": "system", "content": "You are a Principal Product Manager. Respond ONLY in valid JSON."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.2,
+                        max_tokens=2500,
+                        response_format={"type": "json_object"},
+                    )
+                    parsed = _extract_json_from_text(response.choices[0].message.content)
+                    if parsed and "evaluations" in parsed:
+                        parsed_evals = parsed["evaluations"]
+                        break
+                except Exception as e:
+                    logger.warning(f"Mistral prioritization error on {m_name}: {e}...")
+
+    # 3. Attempt Groq AI Fallback — without this leg, evaluation failed entirely when
+    # Gemini was unreachable, even though Groq carried a valid key.
+    if not parsed_evals:
+        groq_client = get_groq_client()
+        if groq_client:
+            for m_name in GROQ_MODELS:
+                try:
+                    logger.info(f"Running AI prioritization evaluation with Groq {m_name}...")
+                    response = groq_client.chat.completions.create(
+                        model=m_name,
+                        messages=[
+                            {"role": "system", "content": "You are a Principal Product Manager. Respond ONLY in valid JSON."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.2,
+                        max_tokens=2500,
+                        response_format={"type": "json_object"} if m_name in ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"] else None,
+                    )
+                    parsed = _extract_json_from_text(response.choices[0].message.content)
+                    if parsed and "evaluations" in parsed:
+                        parsed_evals = parsed["evaluations"]
+                        break
+                except Exception as e:
+                    logger.warning(f"Groq prioritization error on {m_name}: {e}...")
 
     # Apply updates if evaluations succeeded
     if parsed_evals:

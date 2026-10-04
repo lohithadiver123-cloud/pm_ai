@@ -30,6 +30,10 @@ class Settings:
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "allam-2-7b")
 
+    # AI / Mistral configuration (free Experiment tier, OpenAI-compatible API)
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
+    MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+
     # CORS configuration - allow all origins for development
     CORS_ORIGINS: list = ["*"]
 

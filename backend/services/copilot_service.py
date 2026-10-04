@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 from config import settings
-from services.ai_service import get_gemini_client, get_groq_client, _extract_json_from_text, GEMINI_MODELS, GROQ_MODELS
+from services.ai_service import get_gemini_client, get_groq_client, get_mistral_client, _extract_json_from_text, GEMINI_MODELS, GROQ_MODELS, MISTRAL_MODELS
 from services.prd_service import get_prds_for_workspace
 from services.user_story_service import get_stories_for_workspace
 import database
@@ -61,6 +61,7 @@ async def build_workspace_pm_context(workspace_id: str) -> Dict[str, Any]:
             
         for pp in cached_insights.get("pain_points", [])[:5]:
             context["pain_points"].append({
+                "id": pp.get("id"),
                 "title": pp.get("title"),
                 "severity": pp.get("severity"),
                 "impact_score": pp.get("impact_score"),
@@ -71,6 +72,7 @@ async def build_workspace_pm_context(workspace_id: str) -> Dict[str, Any]:
             
         for fc in cached_insights.get("feature_clusters", [])[:5]:
             context["feature_clusters"].append({
+                "id": fc.get("id"),
                 "name": fc.get("cluster_name"),
                 "demand": fc.get("demand_level"),
                 "priority_score": fc.get("priority_score"),
@@ -102,8 +104,16 @@ async def build_workspace_pm_context(workspace_id: str) -> Dict[str, Any]:
     return context
 
 
+# Displayed whenever the deterministic engine answers instead of an AI model, so the
+# user always knows whether they are reading model output or the workspace's own data.
+FALLBACK_DISCLOSURE = (
+    "Answered by the deterministic engine (no AI provider reachable): every number above "
+    "comes from this workspace's stored analysis."
+)
+
+
 def _generate_fallback_chat_reply(message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-    """Generates intelligent, context-aware PM assistance when AI models are unavailable."""
+    """Context-aware PM assistance built from the workspace's own analysis when AI is down."""
     msg_lower = message.lower()
     total_fb = context.get("total_feedback", 0)
     pain_points = context.get("pain_points", [])
@@ -115,52 +125,64 @@ def _generate_fallback_chat_reply(message: str, context: Dict[str, Any]) -> Dict
         "What are our highest severity pain points?",
         "Which feature has the highest priority score?",
         "Draft a PRD for the most requested feature",
-        "Summarize recent negative customer feedback"
-    ]
+        "Summarize recent negative customer feedback",
+    ][: (2 if not pain_points and not clusters else 4)]
     action = None
 
     if any(k in msg_lower for k in ["pain", "complain", "issue", "bug", "crash", "problem", "frustrat", "friction"]):
         pp_list = "\n".join([f"- **{p['title']}** (Severity: `{p['severity'].upper()}`, Impact: `{p['impact_score']}`)\n  *Root Cause:* {p.get('root_cause', 'N/A')}\n  *Action:* {p.get('action', 'N/A')}" for p in pain_points[:3]]) if pain_points else "No active pain points recorded."
         reply = (
-            f"### 🚨 Top Customer Pain Points & Friction Analysis\n\n"
-            f"Based on analysis of **{total_fb:,} customer feedback items**, here are the primary friction areas:\n\n"
+            f"### Top Customer Pain Points & Friction Analysis\n\n"
+            f"From **{total_fb:,} analysed feedback records** in this workspace, ranked by measured impact:\n\n"
             f"{pp_list}\n\n"
-            f"> **PM Recommendation:** Focus engineering bandwidth on resolving the highest impact root causes first to stem user churn and prevent negative app ratings."
+            f"> {FALLBACK_DISCLOSURE}"
         )
         for p in pain_points[:2]:
             sources.append({"type": "pain_point", "title": p["title"], "detail": f"Impact Score: {p.get('impact_score')}"})
-        action = {"action_type": "create_prd", "label": "Generate PRD to Solve Top Pain Point", "payload": {"pain_point_id": pain_points[0]["title"] if pain_points else ""}}
+        action = {
+            "action_type": "create_prd",
+            "label": "Generate PRD for the top pain point",
+            "payload": {"pain_point_id": pain_points[0].get("id") if pain_points else None},
+        }
 
     elif any(k in msg_lower for k in ["feature", "request", "cluster", "build", "opportunity", "want", "wish"]):
         fc_list = "\n".join([f"- **{c['name']}** (Demand: `{c['demand'].upper()}`, Priority Score: `{c['priority_score']}`)\n  *{c.get('summary', '')}*" for c in clusters[:3]]) if clusters else "No feature clusters recorded."
         reply = (
-            f"### 💡 Top Requested Features & Product Opportunities\n\n"
-            f"Clustering user feedback across **{total_fb:,} records** reveals these core customer feature requests:\n\n"
+            f"### Top Requested Features & Product Opportunities\n\n"
+            f"The **{total_fb:,} analysed records** in this workspace group into these demand areas:\n\n"
             f"{fc_list}\n\n"
-            f"Would you like to generate a formal **Product Requirement Document (PRD)** or sprint **User Stories** for any of these?"
+            f"You can turn any of them into a PRD or a set of sprint stories from the workspace pages.\n\n"
+            f"> {FALLBACK_DISCLOSURE}"
         )
         for c in clusters[:2]:
             sources.append({"type": "feature_cluster", "title": c["name"], "detail": f"Priority Score: {c.get('priority_score')}"})
-        action = {"action_type": "create_prd", "label": "Generate PRD for Top Opportunity", "payload": {"title": clusters[0]["name"] if clusters else ""}}
+        action = {
+            "action_type": "create_prd",
+            "label": "Generate PRD for the top opportunity",
+            "payload": {"feature_cluster_id": clusters[0].get("id") if clusters else None},
+        }
 
     elif any(k in msg_lower for k in ["prd", "requirement", "spec", "document"]):
         reply = (
-            f"### 📄 PRD Generation Readiness\n\n"
-            f"I have full context on **{len(clusters)} feature clusters** and **{len(pain_points)} customer pain points** in this workspace.\n\n"
-            f"You can generate an enterprise-grade PRD instantly by choosing an opportunity from the **PRD Studio** or by telling me the title you'd like to specify."
+            f"### PRD Generation Readiness\n\n"
+            f"This workspace has **{len(clusters)} demand clusters** and **{len(pain_points)} ranked "
+            f"pain points** that a document can be grounded on.\n\n"
+            f"Open **PRD Studio** and pick one, or describe the brief yourself.\n\n"
+            f"> {FALLBACK_DISCLOSURE}"
         )
         action = {"action_type": "create_prd", "label": "Open PRD Studio", "payload": {}}
 
     else:
-        top_th = ", ".join(themes[:3]) if themes else "Stability, Performance, Usability"
+        top_th = ", ".join(themes[:3]) if themes else "none yet — run the analysis on this workspace"
         reply = (
-            f"### 🤖 PM Copilot Intelligence Overview\n\n"
-            f"I'm monitoring your workspace with **{total_fb:,} ingested feedback records**.\n\n"
-            f"- **Dominant Themes:** {top_th}\n"
-            f"- **Identified Pain Points:** {len(pain_points)} critical friction items tracked\n"
-            f"- **Opportunity Clusters:** {len(clusters)} customer demand groups\n"
-            f"- **Existing PRDs:** {len(context.get('existing_prds', []))} generated in workspace\n\n"
-            f"Ask me anything about customer sentiment, prioritization rankings, user stories, or to draft requirements!"
+            f"### Workspace Overview\n\n"
+            f"This workspace holds **{total_fb:,} analysed feedback records**.\n\n"
+            f"- **Themes:** {top_th}\n"
+            f"- **Pain points:** {len(pain_points)} ranked by measured impact\n"
+            f"- **Demand clusters:** {len(clusters)} grouped from the feedback\n"
+            f"- **PRDs in this workspace:** {len(context.get('existing_prds', []))}\n\n"
+            f"Ask me about sentiment, prioritisation, user stories, or the evidence behind any of these.\n\n"
+            f"> {FALLBACK_DISCLOSURE}"
         )
 
     return {
@@ -263,7 +285,33 @@ Return ONLY a valid JSON object matching this schema:
             except Exception as e:
                 logger.warning(f"Gemini Copilot chat error on {g_model}: {e}. Retrying next...")
 
-    # Fallback to Groq if Gemini fails
+    # Fallback to Mistral (free Experiment tier, OpenAI-compatible) if Gemini fails
+    if not parsed_res:
+        mistral_client = get_mistral_client()
+        if mistral_client:
+            for m_name in MISTRAL_MODELS:
+                try:
+                    logger.info(f"Attempting Mistral PM Copilot chat using {m_name}...")
+                    response = mistral_client.chat.completions.create(
+                        model=m_name,
+                        messages=[
+                            {"role": "system", "content": "You are the PM Copilot. Respond ONLY in valid JSON."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.3,
+                        max_tokens=2200,
+                        response_format={"type": "json_object"},
+                    )
+                    content = response.choices[0].message.content
+                    parsed = _extract_json_from_text(content)
+                    if parsed and "reply" in parsed:
+                        parsed_res = parsed
+                        ai_model_name = f"Mistral ({m_name})"
+                        break
+                except Exception as e:
+                    logger.warning(f"Mistral Copilot chat error on {m_name}: {e}...")
+
+    # Fallback to Groq if Mistral fails
     if not parsed_res:
         groq_client = get_groq_client()
         if groq_client:

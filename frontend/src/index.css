@@ -1736,7 +1736,10 @@ a:hover {
   flex-wrap: wrap;
 }
 
-.workspace-selector-box {
+/* --- Workspace switcher: the one control that sets the app's scope --- */
+
+.ws-switcher {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -1744,24 +1747,304 @@ a:hover {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  transition: border-color var(--transition), box-shadow var(--transition),
+    background var(--transition);
 }
 
-.ws-label {
+.ws-switcher:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-subtle);
+}
+
+.ws-switcher.is-open,
+.ws-switcher:focus-within {
+  background: var(--bg-card);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.ws-switcher-label {
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--text-muted);
   white-space: nowrap;
+  transition: color var(--transition);
 }
 
-.ws-dropdown {
-  border: 0;
+.ws-switcher:hover .ws-switcher-label,
+.ws-switcher.is-open .ws-switcher-label {
+  color: var(--text);
+}
+
+.ws-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: 240px;
+  min-height: 28px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition),
+    box-shadow var(--transition), color var(--transition);
+}
+
+.ws-trigger:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+}
+
+.ws-trigger:active:not(:disabled) {
+  background: var(--bg-sunken);
+}
+
+.ws-trigger:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.ws-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ws-trigger-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+  transition: background var(--transition);
+}
+
+.ws-trigger:hover:not(:disabled) .ws-trigger-dot {
+  background: var(--primary-ink);
+}
+
+.ws-trigger-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-trigger-caret {
+  flex: none;
+  color: var(--text-muted);
+  transition: transform var(--transition), color var(--transition);
+}
+
+.ws-trigger:hover:not(:disabled) .ws-trigger-caret {
+  color: var(--text);
+}
+
+.ws-trigger-caret.is-open {
+  transform: rotate(180deg);
+}
+
+/* The listbox: rows highlight on hover, the active one carries a check. */
+
+/* Left-aligned: the switcher sits near the left edge on most pages, and an
+   anchored-to-the-right menu would hang off a narrow viewport. The width cap
+   keeps it inside the screen either way. */
+.ws-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 264px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: var(--sp-1);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: ws-menu-in 0.14s ease-out;
+}
+
+/* Move only. Never fade from zero — if the animation is throttled the list
+   must still be readable. */
+@keyframes ws-menu-in {
+  from {
+    transform: translateY(-4px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.ws-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ws-menu-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-sunken);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.ws-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font);
   font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text);
+  text-align: left;
   cursor: pointer;
+  transition: background var(--transition), color var(--transition),
+    box-shadow var(--transition);
+}
+
+.ws-option:hover,
+.ws-option.is-active {
+  background: var(--primary-light);
+  color: var(--primary-ink);
+}
+
+.ws-option.is-active {
+  font-weight: 600;
+}
+
+.ws-option:focus-visible {
   outline: none;
-  max-width: 220px;
+  background: var(--primary-light);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.ws-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-option-arrow {
+  flex: none;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.ws-option:hover .ws-option-arrow {
+  opacity: 0.6;
+  transform: none;
+}
+
+.ws-menu-empty {
+  padding: var(--sp-3) var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.ws-menu-foot {
+  margin-top: var(--sp-1);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* Stacked: label above a full-width trigger, so it sits beside a Select. */
+
+.ws-switcher.is-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-1);
+  min-width: 160px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.ws-switcher.is-stacked:hover,
+.ws-switcher.is-stacked.is-open,
+.ws-switcher.is-stacked:focus-within {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.ws-switcher.is-stacked .ws-trigger {
+  justify-content: flex-start;
+  max-width: none;
+  min-height: 34px;
+  padding: var(--sp-2);
+  background: var(--bg-card);
+  border-color: var(--border);
+  font-weight: 500;
+}
+
+.ws-switcher.is-stacked .ws-trigger:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: var(--border-hover);
+  box-shadow: none;
+}
+
+.ws-switcher.is-stacked.is-open .ws-trigger,
+.ws-switcher.is-stacked .ws-trigger:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.ws-switcher.is-stacked .ws-trigger-name {
+  flex: 1;
+  text-align: left;
+}
+
+.ws-switcher.is-stacked .ws-menu {
+  left: 0;
+  right: auto;
+}
+
+@media (max-width: 640px) {
+  .ws-switcher {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ws-menu {
+    left: 0;
+    right: 0;
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 /* =============================================================

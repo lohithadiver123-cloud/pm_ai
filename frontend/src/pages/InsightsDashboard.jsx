@@ -10,6 +10,7 @@ import {
   TrendAreaChart,
 } from '../components/Charts';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -30,6 +31,7 @@ import {
   Stat,
   StatGrid,
   Tabs,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const TABS = [
@@ -70,8 +72,7 @@ export default function InsightsDashboard() {
   const navigate = useNavigate();
   const { begin } = useBusy();
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [selectedWorkspace, setSelectedWorkspace] = useState('');
+  const { activeId: selectedWorkspace, ready } = useWorkspaces();
   const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState('');
@@ -105,17 +106,10 @@ export default function InsightsDashboard() {
     }
   }, []);
 
+  // The workspace list itself lives in the provider; only the optional AI
+  // engine status is fetched here.
   useEffect(() => {
     (async () => {
-      try {
-        const { data } = await api.get('/workspaces');
-        setWorkspaces(data);
-        if (data.length > 0) setSelectedWorkspace(data[0]._id);
-        else setLoading(false);
-      } catch {
-        setError('Could not load your workspaces.');
-        setLoading(false);
-      }
       try {
         const { data } = await api.get('/insights/ai/status');
         setAiStatus(data);
@@ -124,6 +118,10 @@ export default function InsightsDashboard() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (ready && !selectedWorkspace) setLoading(false);
+  }, [ready, selectedWorkspace]);
 
   useEffect(() => {
     if (selectedWorkspace) fetchInsights(selectedWorkspace);
@@ -153,6 +151,10 @@ export default function InsightsDashboard() {
   const clusters = insights?.feature_clusters || [];
   const themes = insights?.themes || [];
   const trends = insights?.trends || [];
+  // `/insights/{workspace}` returns `*_distribution`; `/workspaces/{id}/stats` returns `by_*`.
+  // Accept both so the charts never silently render zeros.
+  const sentimentDistribution = insights?.sentiment_distribution || insights?.by_sentiment || {};
+  const categoryDistribution = insights?.category_distribution || insights?.by_category || {};
   const filteredPainPoints =
     severityFilter === 'all' ? painPoints : painPoints.filter((pp) => pp.severity === severityFilter);
 
@@ -207,19 +209,7 @@ export default function InsightsDashboard() {
       <Card>
         <CardBody>
           <div className="row row-wrap row-between">
-            <Select
-              label="Workspace"
-              value={selectedWorkspace}
-              onChange={(e) => setSelectedWorkspace(e.target.value)}
-              disabled={workspaces.length === 0}
-            >
-              {workspaces.length === 0 && <option value="">No workspaces</option>}
-              {workspaces.map((ws) => (
-                <option key={ws._id} value={ws._id}>
-                  {ws.name}
-                </option>
-              ))}
-            </Select>
+            <WorkspaceSwitcher layout="stacked" />
 
             <span className="text-sm text-muted">
               {insights?.analyzed_at
@@ -282,6 +272,19 @@ export default function InsightsDashboard() {
             <Stat label="Pain points" value={painPoints.length} hint="Ranked by impact score" />
             <Stat label="Feature clusters" value={clusters.length} hint="Grouped opportunity areas" />
           </StatGrid>
+
+          {/* Say plainly which engine produced this analysis, so a review can tell
+              model output apart from figures mined out of the workspace itself. */}
+          <div className="callout stack stack-xs">
+            <strong className="text-sm">
+              {insights.ai_powered ? 'AI-assisted analysis' : 'Analysis mode: deterministic engine'}
+            </strong>
+            <span className="text-xs text-muted">
+              {insights.ai_powered
+                ? `Themes, pain points and clusters were reviewed by ${insights.ai_model || 'an AI model'}. Every count, rating and quote below still comes from the records in this workspace.`
+                : 'No AI provider was reachable, so themes, pain points and clusters were mined from the wording of your own feedback. Every count, rating and quote below is computed from your records — nothing is estimated or invented.'}
+            </span>
+          </div>
 
           {insights.ai_summary && (
             <Card>
@@ -438,7 +441,13 @@ export default function InsightsDashboard() {
               <Card>
                 <CardHeader
                   title="Feature opportunity priorities"
-                  hint="Ranked by request volume, how many customers asked, and satisfaction upside."
+                  hint={
+                    clusters.some(
+                      (c) => c.score_breakdown?.unique_customers_count_basis === 'unique_customers'
+                    )
+                      ? 'Ranked by request volume, how many customers asked, and satisfaction upside.'
+                      : 'Ranked by request volume and satisfaction upside. This workspace has no per-user identity, so how many distinct customers asked is not counted.'
+                  }
                 />
                 <CardBody>
                   {clusters.length === 0 ? (
@@ -491,8 +500,10 @@ export default function InsightsDashboard() {
                         {cluster.sample_requests?.length > 0 && (
                           <div className="quotes-section">
                             <span className="quotes-title">
-                              {cluster.request_count} requests from{' '}
-                              {cluster.unique_customers_count || cluster.request_count} customers
+                              {cluster.request_count} requests
+                              {cluster.score_breakdown?.unique_customers_count_basis === 'unique_customers'
+                                ? ` from ${cluster.unique_customers_count} customers`
+                                : ''}
                             </span>
                             {cluster.sample_requests.map((request) => (
                               <blockquote key={request} className="quote-bubble">
@@ -662,7 +673,7 @@ export default function InsightsDashboard() {
             <CardHeader title="Category mix" />
             <CardBody>
               <CategoryPieChart
-                categoryDistribution={insights.by_category || {}}
+                categoryDistribution={categoryDistribution}
                 totalFeedback={insights.total_analyzed}
               />
             </CardBody>
@@ -671,9 +682,9 @@ export default function InsightsDashboard() {
             <CardHeader title="Sentiment split" />
             <CardBody>
               <SentimentDonutChart
-                positive={insights.by_sentiment?.positive || 0}
-                neutral={insights.by_sentiment?.neutral || 0}
-                negative={insights.by_sentiment?.negative || 0}
+                positive={sentimentDistribution.positive || 0}
+                neutral={sentimentDistribution.neutral || 0}
+                negative={sentimentDistribution.negative || 0}
                 healthScore={insights.health_score || 0}
               />
             </CardBody>

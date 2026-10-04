@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { sentiment as sentimentTones } from '../theme';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -14,6 +15,7 @@ import {
   Select,
   SkeletonTable,
   Toolbar,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const CATEGORIES = [
@@ -58,8 +60,7 @@ export default function FeedbackList() {
   const navigate = useNavigate();
   const { begin } = useBusy();
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [selectedWorkspace, setSelectedWorkspace] = useState('');
+  const { activeId: selectedWorkspace, ready } = useWorkspaces();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -97,19 +98,10 @@ export default function FeedbackList() {
     }
   }, [selectedWorkspace, page, limit, category, sentiment, source]);
 
+  // No workspace means no query, so clear the flag the table is waiting on.
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get('/workspaces');
-        setWorkspaces(data);
-        if (data.length > 0) setSelectedWorkspace(data[0]._id);
-        else setLoading(false);
-      } catch {
-        setError('Could not load your workspaces.');
-        setLoading(false);
-      }
-    })();
-  }, []);
+    if (ready && !selectedWorkspace) setLoading(false);
+  }, [ready, selectedWorkspace]);
 
   useEffect(() => {
     fetchFeedback();
@@ -179,22 +171,7 @@ export default function FeedbackList() {
       <Toolbar
         left={
           <>
-            <Select
-              label="Workspace"
-              value={selectedWorkspace}
-              onChange={(e) => {
-                setSelectedWorkspace(e.target.value);
-                setPage(1);
-              }}
-              disabled={workspaces.length === 0}
-            >
-              {workspaces.length === 0 && <option value="">No workspaces</option>}
-              {workspaces.map((ws) => (
-                <option key={ws._id} value={ws._id}>
-                  {ws.name}
-                </option>
-              ))}
-            </Select>
+            <WorkspaceSwitcher layout="stacked" onChange={() => setPage(1)} />
 
             <Select label="Category" value={category} onChange={resetTo(setCategory)}>
               {CATEGORIES.map((c) => (

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import api from '../services/api';
 import Icon from '../components/Icon';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -22,6 +23,7 @@ import {
   StatGrid,
   Textarea,
   Toolbar,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const COLUMNS = [
@@ -64,8 +66,7 @@ export default function UserStoriesWorkspace() {
   const { begin } = useBusy();
   const initialPrdId = new URLSearchParams(location.search).get('prd_id') || '';
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [selectedWorkspace, setSelectedWorkspace] = useState('');
+  const { activeId: selectedWorkspace, ready } = useWorkspaces();
   const [prds, setPrds] = useState([]);
   const [clusters, setClusters] = useState([]);
   const [prdFilter, setPrdFilter] = useState(initialPrdId);
@@ -119,38 +120,24 @@ export default function UserStoriesWorkspace() {
     }
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get('/workspaces');
-        setWorkspaces(data);
-        if (data.length === 0) {
-          setLoading(false);
-          return;
-        }
-        const stored = localStorage.getItem('pm_copilot_active_ws');
-        const active = stored && data.some((w) => (w._id || w.id) === stored)
-          ? stored
-          : data[0]._id || data[0].id;
-        setSelectedWorkspace(active);
-        localStorage.setItem('pm_copilot_active_ws', active);
-        await loadPrdsAndClusters(active);
-        await loadStories(active, initialPrdId);
-      } catch {
-        setError('Could not load your workspaces.');
-        setLoading(false);
-      }
-    })();
-  }, [initialPrdId, loadPrdsAndClusters, loadStories]);
+  // `?prd_id=` scopes the very first load only — after that, moving workspace
+  // resets the PRD filter instead of stranding it on a document that may not
+  // exist in the next workspace.
+  const firstLoad = useRef(true);
 
-  const changeWorkspace = (event) => {
-    const workspaceId = event.target.value;
-    setSelectedWorkspace(workspaceId);
-    localStorage.setItem('pm_copilot_active_ws', workspaceId);
-    setPrdFilter('');
-    loadPrdsAndClusters(workspaceId);
-    loadStories(workspaceId, '');
-  };
+  useEffect(() => {
+    if (!selectedWorkspace) return undefined;
+    const prdId = firstLoad.current ? initialPrdId : '';
+    firstLoad.current = false;
+    if (!prdId) setPrdFilter('');
+    loadPrdsAndClusters(selectedWorkspace);
+    loadStories(selectedWorkspace, prdId);
+    return undefined;
+  }, [selectedWorkspace, initialPrdId, loadPrdsAndClusters, loadStories]);
+
+  useEffect(() => {
+    if (ready && !selectedWorkspace) setLoading(false);
+  }, [ready, selectedWorkspace]);
 
   const changePrdFilter = (event) => {
     const prdId = event.target.value;
@@ -299,23 +286,7 @@ export default function UserStoriesWorkspace() {
         description="Sprint-ready stories with Gherkin acceptance criteria, Fibonacci points and T-shirt estimates, tracked on a board."
         actions={
           <>
-            <div className="workspace-selector-box">
-              <label className="ws-label" htmlFor="story-workspace">
-                Workspace
-              </label>
-              <select
-                id="story-workspace"
-                className="ws-dropdown"
-                value={selectedWorkspace}
-                onChange={changeWorkspace}
-              >
-                {workspaces.map((ws) => (
-                  <option key={ws._id || ws.id} value={ws._id || ws.id}>
-                    {ws.name || ws.title || 'Untitled workspace'}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <WorkspaceSwitcher />
             <Button
               variant="primary"
               icon="sparkle"
@@ -454,7 +425,7 @@ export default function UserStoriesWorkspace() {
 
                         <p className="story-statement">
                           <strong>As a</strong> <span className="highlight-role">{story.role}</span>,{' '}
-                          <strong>I want</strong> {story.action}, <strong>so that</strong> {story.benefit}.
+                          <strong>I want to</strong> {story.action}, <strong>so that</strong> {story.benefit}.
                         </p>
 
                         {story.acceptance_criteria?.length > 0 && (
@@ -528,7 +499,7 @@ export default function UserStoriesWorkspace() {
                       <div className="table-primary">
                         <strong>{story.title}</strong>
                         <span className="table-secondary">
-                          As a {story.role}, I want {story.action}
+                          As a {story.role}, I want to {story.action}
                         </span>
                       </div>
                     </td>
@@ -565,7 +536,14 @@ export default function UserStoriesWorkspace() {
               <Button variant="secondary" onClick={() => setShowGenerate(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" icon="sparkle" onClick={handleGenerate}>
+              <Button
+                variant="primary"
+                icon="sparkle"
+                onClick={handleGenerate}
+                disabled={
+                  source === 'prd' ? !genPrdId : source === 'cluster' ? !genClusterId : !genPrompt.trim()
+                }
+              >
                 Generate
               </Button>
             </>

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import Icon from '../components/Icon';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -14,6 +15,7 @@ import {
   Pill,
   Skeleton,
   SkeletonText,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const STARTER_PROMPTS = [
@@ -111,8 +113,7 @@ export default function CopilotChat() {
   const navigate = useNavigate();
   const { begin } = useBusy();
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [workspaceId, setWorkspaceId] = useState('');
+  const { activeId: workspaceId, ready, error: workspaceError } = useWorkspaces();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -152,42 +153,30 @@ export default function CopilotChat() {
     }
   }, []);
 
+  // One effect drives both the first load and every later switch: the thread
+  // is per workspace, so moving workspace swaps the conversation.
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get('/workspaces');
-        setWorkspaces(data);
-        if (data.length === 0) {
-          setLoading(false);
-          return;
-        }
-        const stored = localStorage.getItem('pm_copilot_active_ws');
-        const active =
-          stored && data.some((w) => (w._id || w.id) === stored) ? stored : data[0]._id || data[0].id;
-        setWorkspaceId(active);
-        localStorage.setItem('pm_copilot_active_ws', active);
-        await Promise.all([loadHistory(active), loadContext(active)]);
-      } catch {
-        setError('Could not load your workspaces.');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [loadHistory, loadContext]);
+    if (!workspaceId) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setContext(null);
+    Promise.all([loadHistory(workspaceId), loadContext(workspaceId)]).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, loadHistory, loadContext]);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (!workspaceId) setLoading(false);
+    if (workspaceError) setError(workspaceError);
+  }, [ready, workspaceId, workspaceError]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending]);
-
-  const changeWorkspace = async (event) => {
-    const id = event.target.value;
-    setWorkspaceId(id);
-    localStorage.setItem('pm_copilot_active_ws', id);
-    setContext(null);
-    setLoading(true);
-    await Promise.all([loadHistory(id), loadContext(id)]);
-    setLoading(false);
-  };
 
   const send = async (preset) => {
     const text = (preset ?? input).trim();
@@ -262,18 +251,7 @@ export default function CopilotChat() {
         description="Grounded in this workspace's own feedback, themes and specs. Every answer cites the records behind it."
         actions={
           <>
-            <select
-              className="select-input"
-              value={workspaceId}
-              onChange={changeWorkspace}
-              aria-label="Workspace"
-            >
-              {workspaces.map((ws) => (
-                <option key={ws._id || ws.id} value={ws._id || ws.id}>
-                  {ws.name || ws.title || 'Untitled workspace'}
-                </option>
-              ))}
-            </select>
+            <WorkspaceSwitcher />
             <Button
               variant="secondary"
               icon="refresh"

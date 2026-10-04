@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../services/api';
 import { useBusy } from '../context/BusyContext';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -12,6 +13,7 @@ import {
   PageHeader,
   Select,
   SkeletonTable,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const SOURCE_OPTIONS = [
@@ -37,8 +39,7 @@ export default function ImportData() {
   const { begin } = useBusy();
   const fileInputRef = useRef(null);
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [selectedWorkspace, setSelectedWorkspace] = useState('');
+  const { activeId: selectedWorkspace, ready } = useWorkspaces();
   const [source, setSource] = useState('app_review');
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -48,18 +49,6 @@ export default function ImportData() {
 
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
-
-  const fetchWorkspaces = useCallback(async () => {
-    try {
-      const { data } = await api.get('/workspaces');
-      setWorkspaces(data);
-      if (data.length > 0) setSelectedWorkspace(data[0]._id);
-      else setLoadingLogs(false);
-    } catch {
-      setError('Could not load your workspaces.');
-      setLoadingLogs(false);
-    }
-  }, []);
 
   const fetchLogs = useCallback(async (workspaceId) => {
     if (!workspaceId) return;
@@ -74,9 +63,10 @@ export default function ImportData() {
     }
   }, []);
 
+  // Nothing to show the history of until a workspace exists.
   useEffect(() => {
-    fetchWorkspaces();
-  }, [fetchWorkspaces]);
+    if (ready && !selectedWorkspace) setLoadingLogs(false);
+  }, [ready, selectedWorkspace]);
 
   useEffect(() => {
     fetchLogs(selectedWorkspace);
@@ -176,19 +166,11 @@ export default function ImportData() {
 
           <div className="form-row">
             <div className="form-group form-group-half">
-              <Select
+              <WorkspaceSwitcher
                 label="Destination workspace"
-                value={selectedWorkspace}
-                onChange={(e) => setSelectedWorkspace(e.target.value)}
-                disabled={importing || workspaces.length === 0}
-              >
-                {workspaces.length === 0 && <option value="">No workspaces available</option>}
-                {workspaces.map((ws) => (
-                  <option key={ws._id} value={ws._id}>
-                    {ws.name}
-                  </option>
-                ))}
-              </Select>
+                layout="stacked"
+                disabled={importing}
+              />
             </div>
 
             <div className="form-group form-group-half">

@@ -7,11 +7,14 @@ Uses NLTK for basic text processing (Milestone 1 — no ML/AI).
 import re
 from typing import List
 
+# Generic English function/filler words only. Product, brand and domain vocabulary is
+# deliberately absent: which words are background for a given workspace is derived from
+# that workspace's own corpus (see services.text_mining), never assumed here.
 EXTRA_STOPWORDS = {
     "app", "application", "please", "turn", "bring", "getting", "waste", "also", "even",
     "using", "used", "make", "giving", "give", "much", "many", "good", "bad", "like",
-    "need", "want", "would", "could", "should", "thing", "things", "instagram", "facebook",
-    "whatsapp", "meta", "really", "always", "every", "cant", "cannot", "dont", "doesnt",
+    "need", "want", "would", "could", "should", "thing", "things",
+    "really", "always", "every", "cant", "cannot", "dont", "doesnt",
     "wont", "didnt", "got", "get", "still", "back", "time", "one", "two", "see", "seen",
     "features", "feature", "enhancement", "option", "options"
 }

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { CategoryPieChart, SentimentDonutChart } from '../components/Charts';
 import { sentiment, getCategoryColor, tint } from '../theme';
+import { useWorkspaces } from '../context/WorkspaceContext';
 import {
   Alert,
   Badge,
@@ -17,6 +18,7 @@ import {
   SkeletonStatGrid,
   Stat,
   StatGrid,
+  WorkspaceSwitcher,
 } from '../components/ui';
 
 const SENTIMENT_TONE = { positive: 'success', neutral: 'warning', negative: 'danger' };
@@ -36,8 +38,7 @@ function stars(rating) {
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  const [workspaces, setWorkspaces] = useState([]);
-  const [selectedWorkspace, setSelectedWorkspace] = useState('');
+  const { activeId: selectedWorkspace, ready, createWorkspace } = useWorkspaces();
   const [stats, setStats] = useState(null);
   const [recentFeedback, setRecentFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -47,24 +48,11 @@ export default function Dashboard() {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
 
-  const fetchWorkspaces = useCallback(async () => {
-    try {
-      const { data } = await api.get('/workspaces');
-      setWorkspaces(data);
-      if (data.length > 0) {
-        setSelectedWorkspace((current) => current || data[0]._id);
-      } else {
-        setLoading(false);
-      }
-    } catch {
-      setError('Could not load your workspaces.');
-      setLoading(false);
-    }
-  }, []);
-
+  // With no workspace to open there is no stats request either, so nothing
+  // else would ever clear the initial loading flag.
   useEffect(() => {
-    fetchWorkspaces();
-  }, [fetchWorkspaces]);
+    if (ready && !selectedWorkspace) setLoading(false);
+  }, [ready, selectedWorkspace]);
 
   useEffect(() => {
     if (!selectedWorkspace) return undefined;
@@ -97,11 +85,11 @@ export default function Dashboard() {
     if (!newWorkspaceName.trim()) return;
     setCreating(true);
     try {
-      const { data } = await api.post('/workspaces', { name: newWorkspaceName.trim() });
+      // The provider creates it and makes it active, so the page below
+      // immediately reads the workspace that was just made.
+      await createWorkspace(newWorkspaceName);
       setNewWorkspaceName('');
       setShowCreateForm(false);
-      await fetchWorkspaces();
-      if (data?._id) setSelectedWorkspace(data._id);
     } catch {
       setError('Could not create that workspace.');
     } finally {
@@ -124,27 +112,7 @@ export default function Dashboard() {
         description="Feedback volume, what it is about, and how the pipeline is tracking for the selected workspace."
         actions={
           <>
-            <div className="workspace-selector-box">
-              <label className="ws-label" htmlFor="workspace-select">
-                Workspace
-              </label>
-              {workspaces.length > 0 ? (
-                <select
-                  id="workspace-select"
-                  className="ws-dropdown"
-                  value={selectedWorkspace}
-                  onChange={(e) => setSelectedWorkspace(e.target.value)}
-                >
-                  {workspaces.map((ws) => (
-                    <option key={ws._id} value={ws._id}>
-                      {ws.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-muted text-sm">None yet</span>
-              )}
-            </div>
+            <WorkspaceSwitcher />
 
             <Button
               size="sm"

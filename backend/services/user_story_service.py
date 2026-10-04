@@ -6,14 +6,17 @@ with Gherkin Acceptance Criteria, Fibonacci estimation, T-Shirt sizing, and Kanb
 
 import os
 import json
+import re
 import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 from config import settings
-from services.ai_service import get_gemini_client, get_groq_client, _extract_json_from_text, GEMINI_MODELS, GROQ_MODELS
-from services.prd_service import get_prd_by_id
+from services.ai_service import get_gemini_client, get_groq_client, get_mistral_client, _extract_json_from_text, GEMINI_MODELS, GROQ_MODELS, MISTRAL_MODELS
+from services.prd_service import build_document_evidence, get_prd_by_id
+from services.text_mining import match_records_by_terms
+from services.theme_extraction import _resolve_sentiment
 import database
 from database import db
 import fallback_db
@@ -21,111 +24,152 @@ import fallback_db
 logger = logging.getLogger(__name__)
 
 
+def _normalise_phrase(text: str) -> str:
+    """
+    Make a model-written fragment read naturally inside the story sentence.
+
+    Cards render "I want to {action}" and "so that {benefit}", but models often return
+    sentence-style fragments ("Apply filters."). Leading capitals, a leading "to" and
+    trailing periods are stripped; acronyms ("SSO ...") are left intact.
+    """
+    text = str(text or "").strip().rstrip(".")
+    text = re.sub(r"^to\s+", "", text, flags=re.IGNORECASE).strip()
+    if text[:1].isupper() and (len(text) < 2 or text[1:2].islower()):
+        text = text[0].lower() + text[1:]
+    return text
+
+
 def _generate_fallback_stories(
     subject: str,
     prd_title: Optional[str] = None,
     count: int = 5,
-    persona: Optional[str] = None
+    persona: Optional[str] = None,
+    evidence: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Deterministic Agile decomposition when AI models are unavailable."""
-    target_role = persona or "Active Product User"
-    
-    templates = [
-        {
-            "title": f"Initiate and configure {subject}",
-            "role": target_role,
-            "action": f"access a streamlined interface for {subject}",
-            "benefit": "I can accomplish my core workflow quickly without encountering friction or confusion",
-            "points": 3,
-            "size": "S",
-            "priority": "high",
-            "criteria": [
-                {"scenario": f"First-time interaction with {subject}", "given": "the user navigates to the feature screen", "when": "the interface renders", "then": "a clear guided onboarding tooltip highlights the primary action button"},
-                {"scenario": "Input validation", "given": "the user submits invalid parameters", "when": "validation runs", "then": "inline error highlights specify the exact field requiring attention"}
-            ],
-            "dod": ["Unit test coverage >= 85%", "Accessible via keyboard navigation", "API response time < 300ms"],
-            "tech": f"Create POST /api/{subject.lower().replace(' ', '-')}/initiate endpoint with payload validation."
-        },
-        {
-            "title": f"Real-time status updates and telemetry for {subject}",
-            "role": target_role,
-            "action": f"receive immediate visual feedback and status badges when {subject} is processing",
-            "benefit": "I never have to guess whether my request succeeded or is still in progress",
-            "points": 5,
-            "size": "M",
-            "priority": "high",
-            "criteria": [
-                {"scenario": "Background job underway", "given": "the user triggered an asynchronous action", "when": "the job is running", "then": "an animated progress indicator renders with estimated completion time"},
-                {"scenario": "Job completes successfully", "given": "the background task finishes", "when": "server emits completion event", "then": "a green success banner appears and the UI updates without page reload"}
-            ],
-            "dod": ["WebSocket/Polling subscription tested under network disconnect", "Cross-browser verified", "Error states styled"],
-            "tech": "Implement Server-Sent Events (SSE) or optimistic UI update pattern."
-        },
-        {
-            "title": f"Graceful error recovery and retry mechanism for {subject}",
-            "role": target_role,
-            "action": "see human-friendly troubleshooting steps and a one-click retry button when an error occurs",
-            "benefit": "I can recover immediately without losing my work or contacting customer support",
-            "points": 2,
-            "size": "XS",
-            "priority": "medium",
-            "criteria": [
-                {"scenario": "Network timeout occurs", "given": "the user has submitted a request", "when": "a 504 Gateway Timeout is returned", "then": "the system shows 'Network issue detected' with a prominent 'Retry Now' button"},
-                {"scenario": "Automatic offline retry", "given": "the user goes offline", "when": "connection is restored", "then": "pending actions are replayed automatically"}
-            ],
-            "dod": ["Idempotency keys implemented", "Telemetry logged to Sentry/Datadog", "No infinite retry loops"],
-            "tech": "Add Exponential backoff retry handler with client-side UUID idempotency key."
-        },
-        {
-            "title": f"Self-service history and audit log for {subject}",
-            "role": target_role,
-            "action": f"view a searchable history of all past events related to {subject}",
-            "benefit": "I can audit past actions and verify historical outcomes anytime",
-            "points": 5,
-            "size": "M",
-            "priority": "medium",
-            "criteria": [
-                {"scenario": "User filters history by date", "given": "user is on the history tab", "when": "they select 'Last 30 Days'", "then": "table filters instantly and displays paginated results"},
-                {"scenario": "Export history records", "given": "results are displayed", "when": "user clicks 'Export CSV'", "then": "a standardized CSV file downloads within 2 seconds"}
-            ],
-            "dod": ["Pagination tested with 5,000+ items", "CSV injection protection added", "Design review approved"],
-            "tech": "Index database collection on (workspace_id, user_id, created_at)."
-        },
-        {
-            "title": f"Admin controls and permission policy for {subject}",
-            "role": "Product Admin / Workspace Owner",
-            "action": f"configure permissions, thresholds, and limits for {subject}",
-            "benefit": "our team can safeguard organizational compliance and prevent accidental misuse",
-            "points": 8,
-            "size": "L",
-            "priority": "low",
-            "criteria": [
-                {"scenario": "Restricted role attempts unauthorized action", "given": "a user with 'Viewer' permissions", "when": "they attempt to modify settings", "then": "the button is disabled and a tooltip explains permission requirements"},
-                {"scenario": "Admin updates security threshold", "given": "an Admin user", "when": "they save updated rules", "then": "the changes take effect across all active sessions within 60 seconds"}
-            ],
-            "dod": ["Role-based access control (RBAC) middleware verified", "Security penetration tested", "Audit trail logged"],
-            "tech": "Integrate JWT claims validation and RBAC policy evaluation."
-        }
-    ]
+    """
+    Decompose a subject into stories using the workspace's own reports.
+
+    Each story is one topic users actually wrote about, with acceptance criteria that can
+    be checked against this workspace's feedback. Implementation details, technologies and
+    effort estimates cannot be inferred from feedback, so they are marked as such rather
+    than invented.
+    """
+    evidence = evidence or {}
+    source_details = evidence.get("source_details") or {}
+    records = evidence.get("records") or []
+    stats = evidence.get("stats") or {}
+    terms = [str(term) for term in (evidence.get("top_terms") or source_details.get("keywords") or []) if str(term).strip()]
+    if not terms:
+        terms = [subject]
+    negative_count = int(evidence.get("negative_count") or 0)
+    total_matched = int(stats.get("count") or 0)
+    negative_share = (negative_count / total_matched) if total_matched else 0.0
 
     results = []
-    for idx, t in enumerate(templates[:count]):
-        full_stmt = f"As a {t['role']}, I want to {t['action']}, so that {t['benefit']}."
+    for term in terms[:count]:
+        term_records = match_records_by_terms(records, [term]) if records else []
+        term_count = len(term_records)
+        term_low = sum(1 for record in term_records if (record.get("rating") or 5) <= 2)
+        term_negative = sum(1 for record in term_records if _resolve_sentiment(record) == "negative")
+        share = (term_negative / term_count) if term_count else negative_share
+
+        priority = "high" if share >= 0.5 else ("medium" if share >= 0.25 else "low")
+        points = 8 if term_count >= 500 else (5 if term_count >= 100 else (3 if term_count >= 20 else 2))
+        size = "L" if points >= 8 else ("M" if points >= 5 else ("S" if points >= 3 else "XS"))
+        role = persona or "app user"
+        action = f"see the {term} problems I reported resolved"
+        benefit = "the app works the way I expect, without workarounds"
+
         results.append({
-            "title": t["title"],
-            "role": t["role"],
-            "action": t["action"],
-            "benefit": t["benefit"],
-            "full_statement": full_stmt,
-            "acceptance_criteria": t["criteria"],
-            "story_points": t["points"],
-            "t_shirt_size": t["size"],
-            "priority": t["priority"],
-            "definition_of_done": t["dod"],
-            "technical_notes": t["tech"]
+            "title": f"Resolve {term} friction",
+            "role": role,
+            "action": action,
+            "benefit": benefit,
+            "full_statement": f"As a {role}, I want {action}, so that {benefit}.",
+            "acceptance_criteria": [
+                {
+                    "scenario": f"{term} reports stop recurring",
+                    "given": f"this workspace holds {term_count} reports mentioning {term} ({term_negative} negative)",
+                    "when": "the fix ships and the feedback is re-analysed",
+                    "then": f"no new negative report mentioning {term} appears in the next analysis cycle",
+                },
+                {
+                    "scenario": "Existing reports are accounted for",
+                    "given": f"the {term_count} reports mentioning {term}",
+                    "when": "the team closes this story",
+                    "then": "each report is linked to the change that addressed it",
+                },
+            ],
+            "story_points": points,
+            "t_shirt_size": size,
+            "priority": priority,
+            "definition_of_done": [
+                f"Reports mentioning {term} rated 2 or lower fall below the current {term_low}",
+                "A workspace re-analysis shows the reported negative share has fallen",
+                "No implementation detail is asserted here: effort and technology were not inferred from feedback",
+            ],
+            "technical_notes": (
+                f"Not derivable from feedback: this workspace records {term_count} reports mentioning "
+                f"{term} but no implementation detail. Story points and size are placeholders "
+                f"pending engineering estimation."
+            ),
         })
 
-    return results
+    if len(results) < count:
+        # Topics beyond the ones users actually wrote about are filled with structural
+        # stories (workflow, recovery, visibility) rather than fabricated capabilities.
+        results.extend(_template_stories(subject, count - len(results), persona))
+    return results[:count]
+
+
+def _template_stories(subject: str, count: int = 5, persona: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Minimal starting point when a subject has no supporting feedback at all.
+
+    Deliberately structural: it states the workflow the subject needs to support and
+    leaves technology, effort and metrics open instead of inventing them.
+    """
+    target_role = persona or "app user"
+    templates = [{
+        "title": f"{subject}: primary flow",
+        "action": f"complete the {subject} flow without hitting the friction reported in this workspace",
+        "benefit": "I finish the task I came for",
+        "priority": "high",
+    }, {
+        "title": f"{subject}: failure handling",
+        "action": f"see what went wrong when the {subject} flow fails and retry it",
+        "benefit": "I am not left without a recovery path",
+        "priority": "medium",
+    }, {
+        "title": f"{subject}: progress visibility",
+        "action": f"see whether the {subject} work I asked for is being handled",
+        "benefit": "I know whether to wait or try something else",
+        "priority": "medium",
+    }]
+
+    return [{
+        "title": template["title"],
+        "role": target_role,
+        "action": template["action"],
+        "benefit": template["benefit"],
+        "full_statement": f"As a {target_role}, I want to {template['action']}, so that {template['benefit']}.",
+        "acceptance_criteria": [{
+            "scenario": "Primary flow verified against feedback",
+            "given": f"a user attempts the {subject} flow",
+            "when": "the change ships and this workspace is re-analysed",
+            "then": "no new negative report about this flow appears in the next analysis cycle",
+        }],
+        "story_points": 3,
+        "t_shirt_size": "S",
+        "priority": template["priority"],
+        "definition_of_done": [
+            "A workspace re-analysis shows no new negative report for this flow",
+            "No implementation detail is asserted: none is recorded in the feedback",
+        ],
+        "technical_notes": "Not derivable from feedback; to be estimated by the team.",
+    } for template in templates[: max(1, min(count, len(templates)))]]
+
+
 
 
 async def generate_user_stories_with_ai(
@@ -146,6 +190,13 @@ async def generate_user_stories_with_ai(
 
     # 1. Gather context from PRD if provided
     prd_doc = None
+    cluster_details: Optional[Dict[str, Any]] = None
+    cached_insights = None
+    if database._mongodb_available:
+        cached_insights = await db.workspace_insights.find_one({"workspace_id": workspace_id})
+    else:
+        cached_insights = await fallback_db.get_workspace_insights(workspace_id)
+
     if prd_id:
         prd_doc = await get_prd_by_id(prd_id)
         if prd_doc:
@@ -158,28 +209,51 @@ async def generate_user_stories_with_ai(
 
     # 2. Gather context from Feature Cluster if provided
     if feature_cluster_id:
-        cached_insights = None
-        if database._mongodb_available:
-            cached_insights = await db.workspace_insights.find_one({"workspace_id": workspace_id})
-        else:
-            cached_insights = await fallback_db.get_workspace_insights(workspace_id)
-            
-        if cached_insights:
-            for c in cached_insights.get("feature_clusters", []):
-                if c.get("id") == feature_cluster_id:
-                    subject = c.get("cluster_name", subject)
-                    context_notes.append(f"Feature Cluster Demand: {c.get('summary')}")
-                    sample_reqs = c.get("sample_requests", []) or c.get("distinct_sample_quotes", [])
-                    if sample_reqs:
-                        context_notes.append("Customer Wishes: " + "; ".join(sample_reqs[:3]))
-                    break
+        for cluster in ((cached_insights or {}).get("feature_clusters") or []):
+            if cluster.get("id") == feature_cluster_id:
+                cluster_details = cluster
+                subject = cluster.get("cluster_name", subject)
+                context_notes.append(f"Feature Cluster Demand: {cluster.get('summary')}")
+                sample_reqs = cluster.get("sample_requests", []) or cluster.get("distinct_sample_quotes", [])
+                if sample_reqs:
+                    context_notes.append("Customer Wishes: " + "; ".join(sample_reqs[:3]))
+                break
+
+    # A story request must say what to ground on. Without a resolved source the model
+    # would invent a generic product backlog unrelated to this workspace's feedback.
+    if prd_id and not prd_doc:
+        raise ValueError(f"PRD {prd_id} was not found in this workspace.")
+    if feature_cluster_id and not cluster_details:
+        raise ValueError("That feature cluster was not found in this workspace's current analysis.")
+    if not prd_doc and not cluster_details and not (custom_prompt or "").strip():
+        raise ValueError("Choose a PRD or a feature cluster, or describe a custom topic.")
+
+    evidence = await build_document_evidence(
+        workspace_id,
+        cached_insights if feature_cluster_id else None,
+        subject,
+        {"keywords": [str(term) for term in (cluster_details.get("keywords") or [])]} if cluster_details else {},
+        [quote for quote in (cluster_details or {}).get("sample_requests", [])][:10],
+        generation_method="AI provider",
+    )
 
     context_str = "\n".join(context_notes) if context_notes else f"Decompose capability '{subject}' into sprint-ready stories."
+    stats = evidence.get("stats") or {}
+    measured_evidence = (
+        f"- Records analysed in this workspace: {evidence.get('total_analyzed')}\n"
+        f"- Records matching this topic: {stats.get('count')}\n"
+        f"- Average rating of those records: {stats.get('avg_rating')}\n"
+        f"- Negative reports among them: {evidence.get('negative_count')}\n"
+        f"- Phrases users actually wrote: {', '.join(evidence.get('top_terms') or [])}"
+    )
 
     prompt = f"""You are a Principal Agile Product Owner and Scrum Master.
 Generate exactly {count} production-ready, vertical Agile User Stories for:
 Topic / Subject: {subject}
 Target Persona: {persona or 'End User / Product Practitioner'}
+
+Measured evidence from this workspace (computed, do not contradict it):
+{measured_evidence}
 
 Context & Functional Requirements:
 {context_str}
@@ -190,8 +264,8 @@ Return ONLY a valid JSON object matching this schema:
     {{
       "title": "Short punchy story title",
       "role": "Specific User Persona Role",
-      "action": "clear specific capability user performs",
-      "benefit": "clear user or business value delivered",
+      "action": "bare lowercase verb phrase that follows 'I want to', e.g. 'apply multiple filters to my results'",
+      "benefit": "clause that follows 'so that', e.g. 'I can find what I need without scrolling'",
       "acceptance_criteria": [
         {{
           "scenario": "Descriptive scenario name",
@@ -221,6 +295,9 @@ Return ONLY a valid JSON object matching this schema:
 
 Rules:
 - Provide exactly {count} distinct vertical user stories.
+- 'action' must be a bare lowercase verb phrase with no leading 'to' and no trailing period.
+- 'benefit' must be a full clause starting with 'I can' or similar, not a bare verb.
+- Phrase 'action' as something the user wants to do or get (e.g. 'see at most one paywall per hour', 'play a specific song on demand'), never as something done to the user (e.g. 'receive pop-ups', 'be shown ads').
 - Every story MUST have 2-3 Gherkin scenarios with 'given', 'when', 'then'.
 - Story points MUST be Fibonacci: 1, 2, 3, 5, 8, or 13.
 - T-shirt size MUST be: 'XS', 'S', 'M', 'L', or 'XL'.
@@ -229,6 +306,7 @@ Rules:
 """
 
     parsed_stories = None
+    ai_model_used = None
 
     # 1. Attempt Google Gemini Pure AI
     gem_client = get_gemini_client()
@@ -248,12 +326,40 @@ Rules:
                 parsed = _extract_json_from_text(response.text)
                 if parsed and "stories" in parsed and isinstance(parsed["stories"], list):
                     parsed_stories = parsed["stories"]
+                    ai_model_used = f"Google Gemini ({g_model})"
                     logger.info(f"Generated {len(parsed_stories)} user stories via Gemini!")
                     break
             except Exception as e:
                 logger.warning(f"Gemini story generation error on {g_model}: {e}. Retrying next...")
 
-    # 2. Attempt Groq AI Fallback
+    # 2. Attempt Mistral AI Fallback (free Experiment tier, OpenAI-compatible)
+    if not parsed_stories:
+        mistral_client = get_mistral_client()
+        if mistral_client:
+            for m_name in MISTRAL_MODELS:
+                try:
+                    logger.info(f"Attempting Mistral story generation with {m_name}...")
+                    response = mistral_client.chat.completions.create(
+                        model=m_name,
+                        messages=[
+                            {"role": "system", "content": "You are a Principal Agile Product Owner. Respond ONLY in valid JSON."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.2,
+                        max_tokens=2500,
+                        response_format={"type": "json_object"},
+                    )
+                    content = response.choices[0].message.content
+                    parsed = _extract_json_from_text(content)
+                    if parsed and "stories" in parsed and isinstance(parsed["stories"], list):
+                        parsed_stories = parsed["stories"]
+                        ai_model_used = f"Mistral ({m_name})"
+                        logger.info(f"Generated {len(parsed_stories)} user stories via Mistral!")
+                        break
+                except Exception as e:
+                    logger.warning(f"Mistral story error on {m_name}: {e}...")
+
+    # 3. Attempt Groq AI Fallback
     if not parsed_stories:
         groq_client = get_groq_client()
         if groq_client:
@@ -274,6 +380,7 @@ Rules:
                     parsed = _extract_json_from_text(content)
                     if parsed and "stories" in parsed and isinstance(parsed["stories"], list):
                         parsed_stories = parsed["stories"]
+                        ai_model_used = f"Groq ({m_name})"
                         logger.info("Generated user stories via Groq fallback!")
                         break
                 except Exception as e:
@@ -286,12 +393,14 @@ Rules:
             subject=subject,
             prd_title=prd_doc.get("title") if prd_doc else None,
             count=count,
-            persona=persona
+            persona=persona,
+            evidence=evidence,
         )
 
     # 4. Drop non-object entries, then top up from the deterministic engine so
     #    the caller always receives the requested number of usable stories.
     parsed_stories = [s for s in parsed_stories if isinstance(s, dict)]
+    ai_story_count = len(parsed_stories)
     if len(parsed_stories) < count:
         logger.info(f"AI returned {len(parsed_stories)} of {count} stories; topping up deterministically.")
         parsed_stories.extend(_generate_fallback_stories(
@@ -299,6 +408,7 @@ Rules:
             prd_title=prd_doc.get("title") if prd_doc else None,
             count=count,
             persona=persona,
+            evidence=evidence,
         )[: count - len(parsed_stories)])
 
     # Save stories to Database
@@ -307,9 +417,12 @@ Rules:
     
     for idx, s in enumerate(parsed_stories[:count]):
         story_id = f"us_{uuid.uuid4().hex[:10]}"
+        # Stories after the AI batch were topped up by the deterministic engine, so each
+        # story records its own provenance instead of inheriting the batch's model.
+        story_is_ai = bool(ai_model_used) and idx < ai_story_count
         role = s.get("role", persona or "User")
-        action = s.get("action", f"use {subject}")
-        benefit = s.get("benefit", "I can improve my product experience")
+        action = _normalise_phrase(s.get("action") or f"use {subject}")
+        benefit = _normalise_phrase(s.get("benefit") or "I can improve my product experience")
         full_stmt = s.get("full_statement") or f"As a {role}, I want to {action}, so that {benefit}."
 
         doc: Dict[str, Any] = {
@@ -329,7 +442,10 @@ Rules:
             "status": "backlog",
             "definition_of_done": s.get("definition_of_done", ["Unit tests written", "Code reviewed"]),
             "technical_notes": s.get("technical_notes", ""),
-            "ai_generated": True,
+            # True only when a model actually wrote this story; the deterministic engine
+            # must not claim AI authorship.
+            "ai_generated": story_is_ai,
+            "ai_model": ai_model_used if story_is_ai else "Deterministic evidence engine",
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }

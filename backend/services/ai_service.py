@@ -27,6 +27,13 @@ GROQ_MODELS = [
     "allam-2-7b",
 ]
 
+# Mistral models — the free "Experiment" tier carries the largest free allowance
+# (roughly a billion tokens a month) and speaks the OpenAI chat-completions API.
+MISTRAL_MODELS = [
+    "mistral-small-latest",
+    "mistral-medium-latest",
+]
+
 
 def get_gemini_client():
     """Create and return a Google GenAI client if an API key is configured."""
@@ -38,6 +45,19 @@ def get_gemini_client():
         return genai.Client(api_key=api_key)
     except Exception as e:
         logger.warning(f"Failed to initialize Gemini client: {e}")
+        return None
+
+
+def get_mistral_client():
+    """Create and return an OpenAI-compatible Mistral client if an API key is configured."""
+    api_key = settings.MISTRAL_API_KEY or os.getenv("MISTRAL_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        from openai import OpenAI
+        return OpenAI(api_key=api_key, base_url="https://api.mistral.ai/v1")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Mistral client: {e}")
         return None
 
 
@@ -55,25 +75,51 @@ def get_groq_client():
 
 
 def check_ai_status() -> Dict[str, Any]:
-    """Check whether Google Gemini or Groq AI is configured and functional."""
-    gem_client = get_gemini_client()
-    if gem_client:
-        return {
-            "available": True,
-            "provider": "Google Gemini (Pure AI)",
-            "model": "gemini-3.6-flash",
-            "status": "Active",
-            "message": "Google Gemini 3.6 Flash active with 1,000,000 token context."
-        }
+    """
+    Report which AI providers have a key configured.
 
+    This deliberately does not claim a provider is working: a key can be present while the
+    provider is out of quota or down. What actually produced a result is recorded with the
+    result itself (each analysis and document stores its model), and every caller falls back
+    in order: Gemini, then Mistral, then Groq, then the deterministic engine.
+    """
+    gem_client = get_gemini_client()
+    mistral_client = get_mistral_client()
     groq_client = get_groq_client()
-    if groq_client:
+
+    # Providers are tried in this order; the configured ones are listed honestly below.
+    configured = [
+        name for name, client in (
+            ("Gemini", gem_client), ("Mistral", mistral_client), ("Groq", groq_client)
+        ) if client
+    ]
+
+    if configured:
+        # Report the model of the provider that will actually be tried first.
+        if gem_client:
+            lead_model = GEMINI_MODELS[0]
+        elif mistral_client:
+            lead_model = MISTRAL_MODELS[0]
+        else:
+            lead_model = GROQ_MODELS[0]
+        order = " then ".join(configured)
+        if len(configured) == 1:
+            name_list = configured[0]
+        elif len(configured) == 2:
+            name_list = f"{configured[0]} and {configured[1]}"
+        else:
+            name_list = ", ".join(configured[:-1]) + f" and {configured[-1]}"
         return {
             "available": True,
-            "provider": "Groq",
-            "model": GROQ_MODELS[0],
-            "status": "Active",
-            "message": f"Groq AI active using {GROQ_MODELS[0]}."
+            "provider": " + ".join(configured),
+            "model": lead_model,
+            "status": "Configured",
+            "message": (
+                f"Keys configured for {name_list}. Each call is tried in order: "
+                f"{order}, and if every provider fails the deterministic engine runs instead. "
+                "The model that actually answered is stored with each analysis and document, so "
+                "a quota or outage never silences a section."
+            )
         }
 
     return {
@@ -81,7 +127,7 @@ def check_ai_status() -> Dict[str, Any]:
         "provider": "None",
         "model": "None",
         "status": "No API key configured",
-        "message": "Running in fallback heuristic mode."
+        "message": "No AI key is configured, so every analysis and document is produced by the deterministic engine from workspace feedback."
     }
 
 
@@ -277,7 +323,31 @@ Customer Reviews Corpus (Sampled from {len(feedback_records)} records):
             except Exception as e:
                 logger.warning(f"Gemini model {g_model} error: {e}. Trying next...")
 
-    # 2. Try Groq AI Fallback
+    # 2. Try Mistral (free Experiment tier, OpenAI-compatible)
+    mistral_client = get_mistral_client()
+    if mistral_client:
+        for model_name in MISTRAL_MODELS:
+            try:
+                logger.info(f"Attempting Mistral analysis using {model_name}...")
+                response = mistral_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a Principal AI Product Manager. Respond ONLY in valid JSON."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=2200,
+                    response_format={"type": "json_object"},
+                )
+                parsed = _extract_json_from_text(response.choices[0].message.content)
+                if parsed and "pain_points" in parsed and "themes" in parsed and "feature_clusters" in parsed:
+                    parsed["ai_model"] = f"Mistral ({model_name})"
+                    logger.info(f"Mistral analysis succeeded with {model_name}!")
+                    return parsed
+            except Exception as e:
+                logger.warning(f"Mistral model {model_name} error: {e}. Trying next...")
+
+    # 3. Try Groq AI Fallback
     groq_client = get_groq_client()
     if groq_client:
         for model_name in GROQ_MODELS:
